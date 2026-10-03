@@ -1,0 +1,36 @@
+[package]
+name = "purple"
+version = "0.1.0"
+edition = "2021"
+description = "Skin changer for League of Legends"
+
+[lib]
+name = "purple"
+path = "src/lib.rs"
+
+[[bin]]
+name = "purple"
+path = "src/main.rs"
+
+[[bin]]
+name = "purple-ui"
+path = "src/bin/purple-ui.rs"
+
+[[bin]]
+name = "purplectl"
+path = "src/bin/purplectl.rs"
+
+[dependencies]
+anyhow = "1"
+base64 = "0.22"
+camino = "1.1"
+eframe = { version = "0.36", default-features = false, features = ["glow", "default_fonts"] }
+egui = { version = "0.36", default-features = false }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+ltk_overlay = "0.16.2"
+native-tls = "0.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tray-icon = "0.26.0"
+ureq = { version = "2", default-features = false, features = ["native-tls", "json"] }
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging"] }

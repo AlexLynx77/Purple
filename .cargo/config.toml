@@ -1,0 +1,9 @@
+﻿# Toolchain MinGW (w64devkit) installée hors PATH système : voir NOTES.md
+[target.x86_64-pc-windows-gnu]
+linker = "C:/Users/pierr/tools/w64devkit/bin/gcc.exe"
+ar = "C:/Users/pierr/tools/w64devkit/bin/ar.exe"
+rustflags = ["-C", "dlltool=C:/Users/pierr/tools/w64devkit/bin/dlltool.exe"]
+
+[env]
+CC = "C:/Users/pierr/tools/w64devkit/bin/gcc.exe"
+AR = "C:/Users/pierr/tools/w64devkit/bin/ar.exe"
