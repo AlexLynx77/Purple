@@ -3112,6 +3112,7 @@ dependencies = [
  "egui",
  "image",
  "ltk_hash",
+ "ltk_meta",
  "ltk_overlay",
  "ltk_wad",
  "native-tls",

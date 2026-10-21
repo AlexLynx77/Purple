@@ -1,6 +1,6 @@
 //! Command-line mode of `purple.exe`: inspect the client, choose skins, run the engine in a terminal.
 
-use crate::catalog::Catalog;
+use crate::catalog::{self, Catalog};
 use crate::config::Config;
 use crate::engine::{self, Event};
 use crate::lcu::{self, Lcu};
@@ -20,10 +20,10 @@ const USAGE: &str = "usage: purple [command]
   unset <champion>            stop applying a skin for <champion>
   list                        show the configured skins
   run                         wait for champion select and apply the configured skin
-  build <champ id> <skin id>  fetch a skin and build its overlay (no client needed; for testing)
+  build <champ id> <skin id>  make a skin file and build its overlay (no client needed; for testing)
   update-patcher              download the latest LTK Patcher release if it is newer
 
-Set PURPLE_DEBUG=1 for the patcher's full logs.";
+Set PURPLE_DEBUG=1 for the patcher's full logs, PURPLE_SKIN_SOURCE=leagueskins to prefer LeagueSkins' skin files.";
 
 /// Command names handled here (anything else starts the program normally).
 pub const COMMANDS: [&str; 10] =
@@ -127,8 +127,11 @@ fn list() -> Result<()> {
 
 fn build(champion: u32, skin: u32) -> Result<()> {
     let started = Instant::now();
-    let fantome = store::ensure_fantome(champion, skin)?;
-    let overlay = overlay::build(&fantome, skin, &lcu::game_dir()?)?;
+    let game_dir = lcu::game_dir()?;
+    let alias = catalog::champion_alias(champion, Lcu::connect().ok().as_ref());
+    let (fantome, source) = store::ensure_fantome(&game_dir, alias.as_deref(), champion, skin)?;
+    println!("skin file ({source:?}): {}", fantome.display());
+    let overlay = overlay::build(&fantome, skin, &game_dir)?;
     println!("overlay ready in {:.1}s: {}", started.elapsed().as_secs_f32(), overlay.display());
     Ok(())
 }

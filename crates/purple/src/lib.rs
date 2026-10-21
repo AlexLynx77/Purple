@@ -12,6 +12,7 @@ pub mod lcu;
 pub mod overlay;
 pub mod patcher;
 pub mod patcher_install;
+pub mod skingen;
 pub mod status;
 pub mod store;
 pub mod win;

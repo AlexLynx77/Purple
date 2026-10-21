@@ -1,13 +1,16 @@
 //! Local data directory and the skin file cache.
 //!
-//! Skins are small `.fantome` archives fetched on demand from the LeagueSkins repository
-//! and kept under `<data>/skins/<champion id>/<skin id>.fantome` (with its `ETag` next to it, so a
-//! file regenerated upstream for a new game patch is fetched again).
+//! Skins are small `.fantome` archives. Purple generates them from the game's own files
+//! ([`crate::skingen`]) and keeps them under `<data>/skins/<champion id>/<skin id>.gen.fantome`, with
+//! a stamp of the game files they came from so a game patch regenerates them. When generation
+//! fails, the file is fetched from the LeagueSkins repository instead and kept as
+//! `<skin id>.fantome` (with its `ETag` next to it, so a file regenerated upstream for a new game
+//! patch is fetched again). `PURPLE_SKIN_SOURCE=leagueskins` reverses that order.
 
 use anyhow::{bail, Context, Result};
 use std::fs;
 use std::io::Read;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -81,12 +84,92 @@ fn fantome_path(champion_id: u32, skin_id: u32) -> Result<PathBuf> {
     Ok(data_dir()?.join("skins").join(champion_id.to_string()).join(format!("{skin_id}.fantome")))
 }
 
-/// Returns the `.fantome` for a skin, downloading it when it is missing or has changed upstream.
+/// Where a skin file comes from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SkinSource {
+    /// Generated from the game's files.
+    Generated,
+    /// Downloaded from the LeagueSkins repository.
+    LeagueSkins,
+}
+
+/// Returns the `.fantome` for a skin and where it came from.
+///
+/// It is generated from the game in `game_dir` (no network), or downloaded from LeagueSkins when
+/// that fails, for instance when `alias` (the champion's archive name) is unknown. With
+/// `PURPLE_SKIN_SOURCE=leagueskins`, LeagueSkins is tried first: a few of its files carry
+/// hand-made fixes (animations, sounds) that cannot be derived from the game.
+pub fn ensure_fantome(game_dir: &Path, alias: Option<&str>, champion_id: u32, skin_id: u32) -> Result<(PathBuf, SkinSource)> {
+    let generate = || -> Result<PathBuf> {
+        let alias = alias.context("the champion's name is unknown (no catalog yet and no client)")?;
+        ensure_generated(game_dir, alias, champion_id, skin_id)
+    };
+    let prefer_download = std::env::var("PURPLE_SKIN_SOURCE").is_ok_and(|v| v.eq_ignore_ascii_case("leagueskins"));
+    let (first, second) = if prefer_download {
+        (SkinSource::LeagueSkins, SkinSource::Generated)
+    } else {
+        (SkinSource::Generated, SkinSource::LeagueSkins)
+    };
+    let get = |source| match source {
+        SkinSource::Generated => generate(),
+        SkinSource::LeagueSkins => ensure_downloaded(champion_id, skin_id),
+    };
+    match get(first) {
+        Ok(path) => Ok((path, first)),
+        Err(first_error) => {
+            log(&format!("skin {skin_id}: {first:?} failed, trying {second:?}: {first_error:#}"));
+            match get(second) {
+                Ok(path) => Ok((path, second)),
+                Err(second_error) => Err(second_error.context(format!("{first:?}: {first_error:#}"))),
+            }
+        }
+    }
+}
+
+/// Bumped whenever [`crate::skingen`] changes what it writes, so cached files are regenerated.
+const GENERATOR_VERSION: u32 = 1;
+
+/// The generated `.fantome` for a skin, made again when the game files it comes from changed.
+fn ensure_generated(game_dir: &Path, alias: &str, champion_id: u32, skin_id: u32) -> Result<PathBuf> {
+    let path = fantome_path(champion_id, skin_id)?.with_extension("gen.fantome");
+    let stamp_path = path.with_extension("stamp");
+    let stamp = generation_stamp(game_dir, alias)?;
+    if path.exists() && fs::read_to_string(&stamp_path).is_ok_and(|s| s == stamp) {
+        return Ok(path);
+    }
+    let bytes = crate::skingen::generate(game_dir, alias, skin_id, &format!("Skin {skin_id}"))?;
+    fs::create_dir_all(path.parent().context("cache path has no parent")?)?;
+    let part = path.with_extension("part");
+    fs::write(&part, &bytes)?;
+    fs::rename(&part, &path)?;
+    fs::write(&stamp_path, stamp)?;
+    Ok(path)
+}
+
+/// Identifies the game files a generated skin is made from (their size and modification time).
+fn generation_stamp(game_dir: &Path, alias: &str) -> Result<String> {
+    let mut stamp = format!("v{GENERATOR_VERSION}");
+    let ui = game_dir.join("DATA").join("FINAL").join("UI.wad.client");
+    for (file, required) in [(crate::skingen::champion_wad(game_dir, alias), true), (ui, false)] {
+        match fs::metadata(&file) {
+            Ok(meta) => {
+                let modified = meta.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok());
+                stamp.push_str(&format!(" {}:{}", meta.len(), modified.map_or(0, |d| d.as_secs())));
+            }
+            Err(e) if required => return Err(e).with_context(|| format!("no game archive {}", file.display())),
+            Err(_) => stamp.push_str(" -"),
+        }
+    }
+    Ok(stamp)
+}
+
+/// Returns the LeagueSkins `.fantome` for a skin, downloading it when it is missing or has changed
+/// upstream.
 ///
 /// LeagueSkins regenerates its files for every game patch, so a cached copy can go stale. Each
 /// call asks GitHub whether the file changed (conditional request on the saved `ETag`, ~1 small
 /// request per arm). When GitHub cannot be reached, the cached copy is used as is.
-pub fn ensure_fantome(champion_id: u32, skin_id: u32) -> Result<PathBuf> {
+fn ensure_downloaded(champion_id: u32, skin_id: u32) -> Result<PathBuf> {
     let path = fantome_path(champion_id, skin_id)?;
     let etag_path = path.with_extension("etag");
     let cached_etag = if path.exists() { fs::read_to_string(&etag_path).ok() } else { None };

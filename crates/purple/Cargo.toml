@@ -20,9 +20,10 @@ camino = "1.1"
 eframe = { version = "0.37", default-features = false, features = ["glow", "default_fonts"] }
 egui = { version = "0.37", default-features = false }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
-ltk_hash = "0.5"
+ltk_hash = "0.5.1"
+ltk_meta = "0.9.1"
 ltk_overlay = "0.17.0"
-ltk_wad = "0.5"
+ltk_wad = "0.5.10"
 native-tls = "0.2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
