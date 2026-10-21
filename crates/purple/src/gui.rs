@@ -3,7 +3,7 @@
 //! It is only a view. The engine runs in the resident process; this window writes the choices to
 //! `config.json` and reads what the engine is doing from `status.json`.
 
-use crate::catalog::{Catalog, Skin};
+use crate::catalog::{Catalog, Chroma};
 use crate::config::Config;
 use crate::icon;
 use crate::images::Images;
@@ -81,6 +81,7 @@ struct App {
     screenshot: Option<Screenshot>,
     /// Scroll the list and the grid to the current selection.
     reveal: bool,
+    chroma_picker: Option<ChromaPicker>,
 }
 
 pub fn run() -> eframe::Result {
@@ -185,13 +186,14 @@ impl App {
             error: None,
             screenshot,
             reveal: true,
+            chroma_picker: None,
         };
         app.refresh_catalog();
         app
     }
 
     fn skin_name(&self, id: u32) -> String {
-        self.catalog.skins.iter().find(|s| s.id == id).map_or_else(|| format!("skin {id}"), |s| s.name.clone())
+        self.catalog.name_of(id).map_or_else(|| format!("skin {id}"), str::to_owned)
     }
 
     /// Reloads the catalog in the background, from the client's files (or the running client).
@@ -390,6 +392,7 @@ impl App {
         });
         if clicked.is_some() {
             self.selected = clicked;
+            self.chroma_picker = None;
             self.reveal = true; // show the chosen skin of the newly picked champion
         }
     }
@@ -399,8 +402,13 @@ impl App {
     fn header(&mut self, ui: &mut egui::Ui, champion_id: u32) {
         let Some(champion) = self.catalog.champion(&champion_id.to_string()).cloned() else { return };
         ui.horizontal(|ui| {
-            if let Some(texture) = self.images.get(&champion.icon_path, 128) {
-                ui.add(egui::Image::from_texture(texture).fit_to_exact_size(Vec2::splat(44.0)).corner_radius(CornerRadius::same(8)));
+            // The portrait's place is kept while it loads, so the title never moves.
+            let (portrait, _) = ui.allocate_exact_size(Vec2::splat(44.0), Sense::hover());
+            match self.images.get(&champion.icon_path, 128) {
+                Some(texture) => egui::Image::from_texture(texture).corner_radius(CornerRadius::same(8)).paint_at(ui, portrait),
+                None => {
+                    ui.painter().rect_filled(portrait, CornerRadius::same(8), color::RAISED);
+                }
             }
             ui.add_space(4.0);
             ui.vertical(|ui| {
@@ -446,32 +454,49 @@ impl App {
 
         let chosen = self.config.skins.get(&champion_id).copied();
         let base = self.catalog.skins_of(champion_id).find(|s| s.is_base).cloned();
-        let skins: Vec<Skin> = self.catalog.skins_of(champion_id).filter(|s| !s.is_base).cloned().collect();
+        // The default skin comes first, then every other skin.
+        let cards: Vec<Card> = std::iter::once(Card {
+            id: None,
+            name: "Default".to_owned(),
+            tile: base.as_ref().map(|s| s.tile_path.clone()).unwrap_or_default(),
+            chromas: base.as_ref().map(|s| s.chromas.clone()).unwrap_or_default(),
+        })
+        .chain(self.catalog.skins_of(champion_id).filter(|s| !s.is_base).map(|s| Card {
+            id: Some(s.id),
+            name: s.name.clone(),
+            tile: s.tile_path.clone(),
+            chromas: s.chromas.clone(),
+        }))
+        .collect();
         let mut new_choice: Option<Option<u32>> = None;
 
-        egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-            let width = ui.available_width() - 6.0;
-            let columns = (((width + CARD_GAP) / (CARD_MIN_WIDTH + CARD_GAP)).floor() as usize).max(1);
-            let card_width = (width - CARD_GAP * (columns - 1) as f32) / columns as f32;
-            // The default skin comes first, then every other skin.
-            let cards: Vec<(Option<u32>, String, String)> = std::iter::once((
-                None,
-                "Default".to_owned(),
-                base.as_ref().map(|s| s.tile_path.clone()).unwrap_or_default(),
-            ))
-            .chain(skins.iter().map(|s| (Some(s.id), s.name.clone(), s.tile_path.clone())))
-            .collect();
+        let width = ui.available_width() - 6.0;
+        let columns = (((width + CARD_GAP) / (CARD_MIN_WIDTH + CARD_GAP)).floor() as usize).max(1);
+        let card_width = (width - CARD_GAP * (columns - 1) as f32) / columns as f32;
+        let mut grid = egui::ScrollArea::vertical().auto_shrink([false, false]);
+        if self.reveal {
+            // Cards have a fixed size, so the chosen one's row is known before anything loads:
+            // scroll there once, without animation.
+            let row = cards.iter().position(|c| c.holds(chosen)).unwrap_or(0) / columns;
+            let pitch = card_width + CARD_LABEL + CARD_GAP;
+            let centred = row as f32 * pitch - (ui.available_height() - pitch) / 2.0;
+            grid = grid.vertical_scroll_offset(centred.max(0.0));
+        }
+        grid.show(ui, |ui| {
             for row in cards.chunks(columns) {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = CARD_GAP;
-                    for (id, name, tile) in row {
-                        let is_chosen = chosen == *id;
-                        let response = self.skin_card(ui, card_width, tile, name, is_chosen);
-                        if is_chosen && self.reveal {
-                            response.scroll_to_me(Some(egui::Align::Center));
+                    for card in row {
+                        let (response, dot) = self.skin_card(ui, card_width, card, chosen);
+                        let demo = self.screenshot.as_ref().is_some_and(|s| s.picker && s.started.elapsed() > Duration::from_secs(3));
+                        if let (Some(dot), true, true, None) = (&dot, demo, card.holds(chosen), &self.chroma_picker) {
+                            self.chroma_picker = Some(ChromaPicker { card: card.id, anchor: dot.rect });
                         }
-                        if response.clicked() && !is_chosen {
-                            new_choice = Some(*id);
+                        if let Some(dot) = dot.filter(|d| d.clicked()) {
+                            let open = self.chroma_picker.as_ref().is_some_and(|p| p.card == card.id);
+                            self.chroma_picker = (!open).then_some(ChromaPicker { card: card.id, anchor: dot.rect });
+                        } else if response.clicked() && chosen != card.id {
+                            new_choice = Some(card.id);
                         }
                     }
                 });
@@ -479,21 +504,27 @@ impl App {
             }
             ui.add_space(8.0);
         });
+        if let Some(choice) = self.chroma_picker_ui(ui.ctx(), &cards, chosen) {
+            new_choice = Some(choice);
+        }
         if let Some(choice) = new_choice {
             self.choose(champion_id, choice);
         }
     }
 
-    /// Draws one card: the skin's picture with its name underneath.
-    fn skin_card(&mut self, ui: &mut egui::Ui, width: f32, tile_path: &str, name: &str, chosen: bool) -> egui::Response {
+    /// Draws one card: the skin's picture with its name underneath, and the chroma dot when the
+    /// skin has chromas. Returns the card's response and the dot's.
+    fn skin_card(&mut self, ui: &mut egui::Ui, width: f32, card: &Card, chosen: Option<u32>) -> (egui::Response, Option<egui::Response>) {
         let (rect, response) = ui.allocate_exact_size(Vec2::new(width, width + CARD_LABEL), Sense::click());
         if !ui.is_rect_visible(rect) {
-            return response;
+            return (response, None);
         }
+        let selected = card.holds(chosen);
+        let chroma = card.chromas.iter().find(|c| Some(c.id) == chosen);
         let painter = ui.painter().clone();
         let radius = CornerRadius::same(RADIUS);
         let picture = Rect::from_min_size(rect.min, Vec2::splat(width));
-        match self.images.get(tile_path, 320) {
+        match self.images.get(&card.tile, 320) {
             Some(texture) => {
                 egui::Image::from_texture(texture).corner_radius(radius).paint_at(ui, picture);
             }
@@ -501,7 +532,7 @@ impl App {
                 painter.rect_filled(picture, radius, color::RAISED);
             }
         }
-        let border = if chosen {
+        let border = if selected {
             Stroke::new(2.0, color::ACCENT)
         } else if response.hovered() {
             Stroke::new(1.0, color::BORDER_STRONG.gamma_multiply(1.6))
@@ -509,14 +540,138 @@ impl App {
             Stroke::new(1.0, color::BORDER)
         };
         painter.rect_stroke(picture, radius, border, StrokeKind::Outside);
-        if chosen {
+        if selected {
             check_badge(&painter, picture.right_top() + Vec2::new(-15.0, 15.0));
         }
-        let (font, text_color) = if chosen { (semibold(13.0), color::TEXT) } else { (regular(13.0), color::TEXT_DIM) };
+
+        // The chroma dot: a small translucent disc in the picture's corner, showing the chosen
+        // chroma's colours, or a few of the available ones.
+        let dot = (!card.chromas.is_empty()).then(|| {
+            let centre = picture.right_bottom() + Vec2::new(-17.0, -17.0);
+            let area = Rect::from_center_size(centre, Vec2::splat(26.0));
+            let dot = ui.interact(area, ui.make_persistent_id(("chroma-dot", card.id)), Sense::click());
+            let open = self.chroma_picker.as_ref().is_some_and(|p| p.card == card.id);
+            let ring = if dot.hovered() || open { 0.85 } else { 0.35 };
+            painter.circle_filled(centre, 11.0, Color32::from_black_alpha(120));
+            painter.circle_stroke(centre, 11.0, Stroke::new(1.0, Color32::from_white_alpha((255.0 * ring) as u8)));
+            let colors: Vec<[u8; 3]> = match chroma {
+                Some(c) => c.colors.clone(),
+                None => card.chromas.iter().filter_map(|c| c.colors.first().copied()).take(4).collect(),
+            };
+            swatch(&painter, centre, 7.0, &colors);
+            dot.on_hover_cursor(CursorIcon::PointingHand).on_hover_text(format!("{} chromas", card.chromas.len()))
+        });
+
+        let label = chroma.map_or(card.name.as_str(), |c| c.name.as_str());
+        let (font, text_color) = if selected { (semibold(13.0), color::TEXT) } else { (regular(13.0), color::TEXT_DIM) };
         let text_color = if response.hovered() { color::TEXT } else { text_color };
-        let galley = painter.layout(name.to_owned(), font, text_color, width);
+        let galley = painter.layout(label.to_owned(), font, text_color, width);
         painter.with_clip_rect(rect).galley(Pos2::new(rect.left(), picture.bottom() + 8.0), galley, text_color);
-        response.on_hover_cursor(CursorIcon::PointingHand)
+        (response.on_hover_cursor(CursorIcon::PointingHand), dot)
+    }
+
+    /// The open chroma picker, under its card's dot. Returns the choice made in it, if any:
+    /// `Some(None)` for the default skin, `Some(Some(id))` for a skin or a chroma.
+    fn chroma_picker_ui(&mut self, ctx: &egui::Context, cards: &[Card], chosen: Option<u32>) -> Option<Option<u32>> {
+        let picker = self.chroma_picker.as_ref()?;
+        let Some(card) = cards.iter().find(|c| c.id == picker.card) else {
+            self.chroma_picker = None;
+            return None;
+        };
+        let anchor = picker.anchor;
+        let mut choice = None;
+        let area = egui::Area::new(egui::Id::unique("purple-chroma-picker"))
+            .order(egui::Order::Foreground)
+            .fixed_pos(anchor.left_bottom() + Vec2::new(0.0, 6.0))
+            .show(ctx, |ui| {
+                egui::Frame::new()
+                    .fill(color::RAISED)
+                    .stroke(Stroke::new(1.0, color::BORDER_STRONG))
+                    .corner_radius(CornerRadius::same(8))
+                    .inner_margin(Margin::same(8))
+                    .show(ui, |ui| {
+                        ui.set_max_width(8.0 * 30.0);
+                        ui.horizontal_wrapped(|ui| {
+                            ui.spacing_mut().item_spacing = Vec2::splat(6.0);
+                            // The skin itself, then each chroma.
+                            let original = (card.id, card.name.clone(), Vec::new());
+                            let options = std::iter::once(original)
+                                .chain(card.chromas.iter().map(|c| (Some(c.id), c.name.clone(), c.colors.clone())));
+                            for (id, name, colors) in options {
+                                let (rect, response) = ui.allocate_exact_size(Vec2::splat(24.0), Sense::click());
+                                let centre = rect.center();
+                                if colors.is_empty() {
+                                    // The skin without a chroma: an empty ring.
+                                    ui.painter().circle_stroke(centre, 8.0, Stroke::new(1.5, color::TEXT_DIM));
+                                } else {
+                                    swatch(ui.painter(), centre, 9.0, &colors);
+                                }
+                                if chosen == id || response.hovered() {
+                                    let tint = if chosen == id { color::TEXT } else { color::TEXT_DIM };
+                                    ui.painter().circle_stroke(centre, 11.5, Stroke::new(1.5, tint));
+                                }
+                                if response.on_hover_cursor(CursorIcon::PointingHand).on_hover_text(name).clicked() {
+                                    choice = Some(id);
+                                }
+                            }
+                        });
+                    });
+            });
+        // Close on a choice, on Escape, or on a click anywhere else.
+        let clicked_elsewhere = ctx.input(|i| i.pointer.any_pressed())
+            && ctx.pointer_interact_pos().is_some_and(|p| !area.response.rect.contains(p) && !anchor.contains(p));
+        if choice.is_some() || clicked_elsewhere || ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            self.chroma_picker = None;
+        }
+        choice
+    }
+}
+
+/// One card of the grid: the default skin (`id: None`) or a skin, with its chromas.
+struct Card {
+    id: Option<u32>,
+    name: String,
+    tile: String,
+    chromas: Vec<Chroma>,
+}
+
+impl Card {
+    /// Whether `chosen` is this card's skin or one of its chromas.
+    fn holds(&self, chosen: Option<u32>) -> bool {
+        chosen == self.id || self.chromas.iter().any(|c| Some(c.id) == chosen)
+    }
+}
+
+/// The chroma picker opened from a card's dot.
+struct ChromaPicker {
+    card: Option<u32>,
+    anchor: Rect,
+}
+
+/// A disc split into equal wedges, one per colour.
+fn swatch(painter: &egui::Painter, centre: Pos2, radius: f32, colors: &[[u8; 3]]) {
+    let fill = |c: [u8; 3]| Color32::from_rgb(c[0], c[1], c[2]);
+    match colors {
+        [] => {
+            painter.circle_filled(centre, radius, color::TEXT_FAINT);
+        }
+        [only] => {
+            painter.circle_filled(centre, radius, fill(*only));
+        }
+        many => {
+            let n = many.len() as f32;
+            for (i, c) in many.iter().enumerate() {
+                let start = -std::f32::consts::FRAC_PI_2 + std::f32::consts::TAU * i as f32 / n;
+                let end = start + std::f32::consts::TAU / n;
+                let steps = 16;
+                let mut points = vec![centre];
+                points.extend((0..=steps).map(|k| {
+                    let a = start + (end - start) * k as f32 / steps as f32;
+                    centre + radius * Vec2::angled(a)
+                }));
+                painter.add(egui::Shape::convex_polygon(points, fill(*c), Stroke::NONE));
+            }
+        }
     }
 }
 
@@ -563,10 +718,11 @@ fn empty_state(ui: &mut egui::Ui, title: &str, detail: &str) {
 
 /// Development aid: `PURPLE_SCREENSHOT=<file.png>` saves a capture of the window once the
 /// pictures have had time to load, then closes it. `PURPLE_SCREENSHOT_CHAMPION=<name>` picks
-/// the champion shown.
+/// the champion shown; `PURPLE_SCREENSHOT_PICKER=1` opens the chosen skin's chroma picker.
 struct Screenshot {
     path: std::path::PathBuf,
     champion: Option<String>,
+    picker: bool,
     started: Instant,
     requested: bool,
     done: Arc<std::sync::atomic::AtomicBool>,
@@ -577,6 +733,7 @@ impl Screenshot {
         Some(Self {
             path: std::env::var_os("PURPLE_SCREENSHOT")?.into(),
             champion: std::env::var("PURPLE_SCREENSHOT_CHAMPION").ok(),
+            picker: std::env::var_os("PURPLE_SCREENSHOT_PICKER").is_some(),
             started: Instant::now(),
             requested: false,
             done: Arc::default(),
@@ -643,8 +800,8 @@ impl eframe::App for App {
             .show(ui, |ui| self.content(ui));
 
         self.images.end_frame();
-        // Keep revealing until the pictures have loaded, so the layout no longer moves.
-        if self.reveal && ctx.input(|i| i.time) > 2.0 && self.screenshot.as_ref().is_none_or(|s| s.requested) {
+        // The list and the grid have been scrolled to the selection: leave them to the user.
+        if self.reveal && !self.catalog.champions.is_empty() {
             self.reveal = false;
         }
     }

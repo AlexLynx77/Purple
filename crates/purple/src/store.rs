@@ -99,7 +99,15 @@ pub enum SkinSource {
 /// that fails, for instance when `alias` (the champion's archive name) is unknown. With
 /// `PURPLE_SKIN_SOURCE=leagueskins`, LeagueSkins is tried first: a few of its files carry
 /// hand-made fixes (animations, sounds) that cannot be derived from the game.
-pub fn ensure_fantome(game_dir: &Path, alias: Option<&str>, champion_id: u32, skin_id: u32) -> Result<(PathBuf, SkinSource)> {
+///
+/// `parent` is the skin a chroma belongs to (LeagueSkins files chromas under it), `None` for a skin.
+pub fn ensure_fantome(
+    game_dir: &Path,
+    alias: Option<&str>,
+    champion_id: u32,
+    skin_id: u32,
+    parent: Option<u32>,
+) -> Result<(PathBuf, SkinSource)> {
     let generate = || -> Result<PathBuf> {
         let alias = alias.context("the champion's name is unknown (no catalog yet and no client)")?;
         ensure_generated(game_dir, alias, champion_id, skin_id)
@@ -112,7 +120,7 @@ pub fn ensure_fantome(game_dir: &Path, alias: Option<&str>, champion_id: u32, sk
     };
     let get = |source| match source {
         SkinSource::Generated => generate(),
-        SkinSource::LeagueSkins => ensure_downloaded(champion_id, skin_id),
+        SkinSource::LeagueSkins => ensure_downloaded(champion_id, skin_id, parent),
     };
     match get(first) {
         Ok(path) => Ok((path, first)),
@@ -169,11 +177,11 @@ fn generation_stamp(game_dir: &Path, alias: &str) -> Result<String> {
 /// LeagueSkins regenerates its files for every game patch, so a cached copy can go stale. Each
 /// call asks GitHub whether the file changed (conditional request on the saved `ETag`, ~1 small
 /// request per arm). When GitHub cannot be reached, the cached copy is used as is.
-fn ensure_downloaded(champion_id: u32, skin_id: u32) -> Result<PathBuf> {
+fn ensure_downloaded(champion_id: u32, skin_id: u32, parent: Option<u32>) -> Result<PathBuf> {
     let path = fantome_path(champion_id, skin_id)?;
     let etag_path = path.with_extension("etag");
     let cached_etag = if path.exists() { fs::read_to_string(&etag_path).ok() } else { None };
-    match download_fantome(champion_id, skin_id, cached_etag.as_deref().map(str::trim)) {
+    match download_fantome(champion_id, skin_id, parent, cached_etag.as_deref().map(str::trim)) {
         Ok(Download::Unchanged) => Ok(path),
         Ok(Download::New { bytes, etag }) => {
             fs::create_dir_all(path.parent().context("cache path has no parent")?)?;
@@ -201,8 +209,13 @@ enum Download {
     New { bytes: Vec<u8>, etag: Option<String> },
 }
 
-fn download_fantome(champion_id: u32, skin_id: u32, etag: Option<&str>) -> Result<Download> {
-    let url = format!("{SKINS_BASE_URL}/{champion_id}/{skin_id}/{skin_id}.fantome");
+fn download_fantome(champion_id: u32, skin_id: u32, parent: Option<u32>, etag: Option<&str>) -> Result<Download> {
+    // Chromas live in their skin's folder: `<champion>/<skin>/<chroma>/<chroma>.fantome`.
+    let folder = match parent {
+        Some(parent) => format!("{champion_id}/{parent}/{skin_id}"),
+        None => format!("{champion_id}/{skin_id}"),
+    };
+    let url = format!("{SKINS_BASE_URL}/{folder}/{skin_id}.fantome");
     let agent = ureq::AgentBuilder::new()
         .tls_connector(Arc::new(native_tls::TlsConnector::new()?))
         .timeout_connect(Duration::from_secs(10))

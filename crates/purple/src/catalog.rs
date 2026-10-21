@@ -18,6 +18,18 @@ pub struct Skin {
     pub is_base: bool,
     /// Client asset path of the skin's tile image.
     pub tile_path: String,
+    /// Colour variants of this skin (the base skin can have some too).
+    #[serde(default)]
+    pub chromas: Vec<Chroma>,
+}
+
+/// A colour variant of a skin. It has its own skin id and is applied like a skin.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Chroma {
+    pub id: u32,
+    pub name: String,
+    /// One or two colours (RGB) that represent it, as shown by the client.
+    pub colors: Vec<[u8; 3]>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -110,6 +122,17 @@ impl Catalog {
     pub fn skins_of(&self, champion_id: u32) -> impl Iterator<Item = &Skin> {
         self.skins.iter().filter(move |s| s.champion_id == champion_id)
     }
+
+    /// The skin that `chroma_id` is a colour variant of, if it is a chroma.
+    pub fn chroma_parent(&self, chroma_id: u32) -> Option<&Skin> {
+        self.skins_of(chroma_id / 1000).find(|s| s.chromas.iter().any(|c| c.id == chroma_id))
+    }
+
+    /// The name of a skin or of a chroma.
+    pub fn name_of(&self, id: u32) -> Option<&str> {
+        let skin = self.skins.iter().find(|s| s.id == id).map(|s| s.name.as_str());
+        skin.or_else(|| self.chroma_parent(id)?.chromas.iter().find(|c| c.id == id).map(|c| c.name.as_str()))
+    }
 }
 
 /// The champion's alias (`MonkeyKing` for Wukong), which names its game archive: from the cached
@@ -144,7 +167,29 @@ fn parse_skin(v: &Value) -> Option<Skin> {
         name: v.get("name")?.as_str()?.to_owned(),
         is_base: v.get("isBase").and_then(Value::as_bool).unwrap_or(false),
         tile_path: v.get("tilePath").and_then(Value::as_str).unwrap_or_default().to_owned(),
+        chromas: v.get("chromas").and_then(Value::as_array).into_iter().flatten().filter_map(parse_chroma).collect(),
     })
+}
+
+fn parse_chroma(v: &Value) -> Option<Chroma> {
+    let colors = v
+        .get("colors")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|c| parse_hex_color(c.as_str()?))
+        .collect();
+    Some(Chroma { id: u32::try_from(v.get("id")?.as_i64()?).ok()?, name: v.get("name")?.as_str()?.to_owned(), colors })
+}
+
+/// `#RRGGBB` to RGB.
+fn parse_hex_color(text: &str) -> Option<[u8; 3]> {
+    let hex = text.strip_prefix('#')?;
+    if hex.len() != 6 {
+        return None;
+    }
+    let channel = |i: usize| u8::from_str_radix(hex.get(i..i + 2)?, 16).ok();
+    Some([channel(0)?, channel(2)?, channel(4)?])
 }
 
 #[cfg(test)]
@@ -159,6 +204,23 @@ mod tests {
     }
 
     #[test]
+    fn reads_chromas_and_finds_their_skin() {
+        let v: Value = serde_json::json!({"id": 107049, "name": "Victorious Rengar", "tilePath": "/t.jpg", "chromas": [
+            {"id": 107050, "name": "Victorious Rengar (Bronze)", "colors": ["#764D43", "#764D43"]},
+            {"id": 107051, "name": "Victorious Rengar (Silver)", "colors": ["nonsense"]}
+        ]});
+        let skin = parse_skin(&v).unwrap();
+        assert_eq!(skin.chromas.len(), 2);
+        assert_eq!(skin.chromas[0].colors, [[0x76, 0x4D, 0x43], [0x76, 0x4D, 0x43]]);
+        assert!(skin.chromas[1].colors.is_empty());
+        let catalog = Catalog { champions: vec![], skins: vec![skin] };
+        assert_eq!(catalog.chroma_parent(107050).unwrap().id, 107049);
+        assert!(catalog.chroma_parent(107049).is_none());
+        assert_eq!(catalog.name_of(107051), Some("Victorious Rengar (Silver)"));
+        assert_eq!(catalog.name_of(107049), Some("Victorious Rengar"));
+    }
+
+    #[test]
     fn champion_icon_falls_back_to_the_standard_path() {
         let v: Value = serde_json::json!({"id": 266, "name": "Aatrox", "alias": "Aatrox"});
         assert_eq!(parse_champion(&v).unwrap().icon_path, "/lol-game-data/assets/v1/champion-icons/266.png");
@@ -167,7 +229,7 @@ mod tests {
     #[test]
     fn alternate_mode_champions_are_dropped() {
         let champion = |id, alias: &str| Champion { id, name: "Ahri".into(), alias: alias.into(), icon_path: String::new() };
-        let skin = |id: u32| Skin { id, champion_id: id / 1000, name: String::new(), is_base: false, tile_path: String::new() };
+        let skin = |id: u32| Skin { id, champion_id: id / 1000, name: String::new(), is_base: false, tile_path: String::new(), chromas: vec![] };
         let mut catalog = Catalog {
             champions: vec![champion(103, "Ahri"), champion(60103, "Jade_Ahri")],
             skins: vec![skin(103_001), skin(60_103_001)],
@@ -181,7 +243,7 @@ mod tests {
     fn catalog_survives_a_json_round_trip() {
         let catalog = Catalog {
             champions: vec![Champion { id: 1, name: "Annie".into(), alias: "Annie".into(), icon_path: "/i.png".into() }],
-            skins: vec![Skin { id: 1001, champion_id: 1, name: "Goth".into(), is_base: false, tile_path: "/t.jpg".into() }],
+            skins: vec![Skin { id: 1001, champion_id: 1, name: "Goth".into(), is_base: false, tile_path: "/t.jpg".into(), chromas: vec![] }],
         };
         let back: Catalog = serde_json::from_str(&serde_json::to_string(&catalog).unwrap()).unwrap();
         assert_eq!(back.skins[0].id, 1001);

@@ -90,7 +90,8 @@ fn arm(lcu: &Lcu, champion: u32, skin: u32, patcher: &mut Patcher, emit: &mut dy
     let started = Instant::now();
     let game_dir = lcu.install_dir().join("Game");
     let alias = catalog::champion_alias(champion, Some(lcu));
-    let (fantome, source) = store::ensure_fantome(&game_dir, alias.as_deref(), champion, skin)?;
+    let parent = catalog::Catalog::load_cached().and_then(|c| c.chroma_parent(skin).map(|s| s.id));
+    let (fantome, source) = store::ensure_fantome(&game_dir, alias.as_deref(), champion, skin, parent)?;
     store::log(&format!("skin {skin}: {source:?} file {}", fantome.display()));
     let overlay = overlay::build(&fantome, skin, &game_dir)?;
     let host = patcher.ready(emit)?;

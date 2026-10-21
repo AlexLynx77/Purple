@@ -1,100 +1,85 @@
-//! The Purple logo: an isometric cube in violet glass, drawn in code so no image file ships.
+//! The Purple logo, drawn in code so no image file ships with the program.
 //!
-//! Three faces seen from above, the right one split along a diagonal into a light and a dark
-//! facet. Each facet is a soft gradient; the outline and the seams between facets catch the light,
-//! like the rims of a glass object. `build.rs` includes this file to make the `.exe` icon, so it
-//! must not depend on anything.
+//! A dark violet orb with two little pointed ears, after the orbs of Star Guardian Syndra: a
+//! shaded sphere, a pink rim light on its upper-left edge, a glossy highlight, and a small star.
+//! `build.rs` includes this file to make the `.exe` icon, so it must not depend on anything.
 
 type Point = (f32, f32);
 
-// The hexagon outline (pointy top) around the centre C.
-const TOP: Point = (0.5, 0.05);
-const UPPER_RIGHT: Point = (0.89, 0.275);
-const LOWER_RIGHT: Point = (0.89, 0.725);
-const BOTTOM: Point = (0.5, 0.95);
-const LOWER_LEFT: Point = (0.11, 0.725);
-const UPPER_LEFT: Point = (0.11, 0.275);
-const C: Point = (0.5, 0.5);
-
-const OUTLINE: [Point; 6] = [TOP, UPPER_RIGHT, LOWER_RIGHT, BOTTOM, LOWER_LEFT, UPPER_LEFT];
-const SEAMS: [(Point, Point); 4] = [(C, UPPER_LEFT), (C, UPPER_RIGHT), (C, BOTTOM), (C, LOWER_RIGHT)];
-
-/// A facet: its corners, and the colours (RGBA) at its top and at its bottom.
-struct Facet {
-    corners: &'static [Point],
-    top: [f32; 4],
-    bottom: [f32; 4],
-}
-
-const FACETS: [Facet; 4] = [
-    // Top face: the brightest, almost white where the light hits.
-    Facet { corners: &[TOP, UPPER_RIGHT, C, UPPER_LEFT], top: [226.0, 216.0, 255.0, 245.0], bottom: [181.0, 156.0, 251.0, 238.0] },
-    // Left face.
-    Facet { corners: &[UPPER_LEFT, C, BOTTOM, LOWER_LEFT], top: [158.0, 120.0, 248.0, 228.0], bottom: [104.0, 62.0, 214.0, 235.0] },
-    // Right face, upper facet: the light "pointer" slice.
-    Facet { corners: &[C, UPPER_RIGHT, LOWER_RIGHT], top: [190.0, 166.0, 252.0, 232.0], bottom: [139.0, 100.0, 240.0, 232.0] },
-    // Right face, lower facet: the shadow.
-    Facet { corners: &[C, LOWER_RIGHT, BOTTOM], top: [96.0, 56.0, 200.0, 238.0], bottom: [62.0, 30.0, 150.0, 245.0] },
+const CENTRE: Point = (0.5, 0.57);
+const RADIUS: f32 = 0.37;
+/// The ears, as triangles: their tips lean outwards.
+const EARS: [[Point; 3]; 2] = [
+    [(0.205, 0.40), (0.22, 0.135), (0.42, 0.27)],
+    [(0.795, 0.40), (0.78, 0.135), (0.58, 0.27)],
 ];
+/// Where the light comes from (upper left, a little towards the viewer).
+const LIGHT: [f32; 3] = [-0.55, -0.65, 0.52];
 
-/// Whether `p` is inside the convex polygon `poly` (either winding), edges included.
-fn inside(poly: &[Point], p: Point) -> bool {
-    let mut sign = 0.0f32;
-    for i in 0..poly.len() {
-        let (a, b) = (poly[i], poly[(i + 1) % poly.len()]);
-        let cross = (b.0 - a.0) * (p.1 - a.1) - (b.1 - a.1) * (p.0 - a.0);
-        if cross.abs() < 1e-7 {
-            continue;
-        }
-        if sign == 0.0 {
-            sign = cross.signum();
-        } else if cross.signum() != sign {
-            return false;
-        }
+fn mix(a: [f32; 3], b: [f32; 3], t: f32) -> [f32; 3] {
+    let t = t.clamp(0.0, 1.0);
+    [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]
+}
+
+/// Whether `p` is inside the triangle `t` (either winding).
+fn in_triangle(t: &[Point; 3], p: Point) -> bool {
+    let side = |a: Point, b: Point| (b.0 - a.0) * (p.1 - a.1) - (b.1 - a.1) * (p.0 - a.0);
+    let (d1, d2, d3) = (side(t[0], t[1]), side(t[1], t[2]), side(t[2], t[0]));
+    !((d1 < 0.0 || d2 < 0.0 || d3 < 0.0) && (d1 > 0.0 || d2 > 0.0 || d3 > 0.0))
+}
+
+/// A four-pointed star centred on `c`, of half-size `r`: its coverage at `p` (0 to 1).
+fn star(p: Point, c: Point, r: f32) -> f32 {
+    let (dx, dy) = ((p.0 - c.0).abs() / r, (p.1 - c.1).abs() / r);
+    (1.0 - (dx.sqrt() + dy.sqrt())).clamp(0.0, 1.0).powf(0.4)
+}
+
+/// The colour (RGB) and coverage of the logo at `p` in the unit square.
+fn shade(p: Point, with_star: bool) -> Option<([f32; 3], f32)> {
+    const DEEP: [f32; 3] = [30.0, 8.0, 52.0];
+    const BODY: [f32; 3] = [88.0, 30.0, 128.0];
+    const RIM: [f32; 3] = [255.0, 170.0, 240.0];
+
+    let (dx, dy) = ((p.0 - CENTRE.0) / RADIUS, (p.1 - CENTRE.1) / RADIUS);
+    let d2 = dx * dx + dy * dy;
+    let color = if d2 <= 1.0 {
+        // Sphere: diffuse light, then a rim light where the surface turns away (upper left).
+        let nz = (1.0 - d2).sqrt();
+        let diffuse = (dx * LIGHT[0] + dy * LIGHT[1] + nz * LIGHT[2]).max(0.0);
+        let mut c = mix(DEEP, BODY, diffuse * 1.15);
+        let facing_light = ((-dx * 0.6 - dy * 0.8) / d2.sqrt().max(1e-3)).max(0.0);
+        let rim = (1.0 - nz).powf(0.9) * facing_light.powf(0.7);
+        c = mix(c, RIM, rim * 1.1);
+        // A soft violet bounce light on the lower right.
+        let bounce = (1.0 - nz).powf(3.0) * ((dx * 0.5 + dy * 0.85) / d2.sqrt().max(1e-3)).max(0.0);
+        c = mix(c, [150.0, 90.0, 230.0], bounce * 0.6);
+        // Glossy highlight: a small soft oval on the upper left.
+        let (hx, hy) = ((dx + 0.34) / 0.2, (dy + 0.46) / 0.12);
+        let gloss = (1.0 - (hx * hx + hy * hy)).clamp(0.0, 1.0);
+        mix(c, [255.0, 236.0, 255.0], gloss * 0.9)
+    } else if let Some(ear) = EARS.iter().find(|ear| in_triangle(ear, p)) {
+        // Ears: lit like the sphere's top, their outer edge catching the rim light.
+        let tip = ear[1];
+        let along = ((p.1 - tip.1) / (ear[0].1 - tip.1)).clamp(0.0, 1.0);
+        let c = mix(BODY, DEEP, 0.35 + along * 0.5);
+        // The left ear faces the light: its outer edge glows like the sphere's rim.
+        let left = ear[0].0 < 0.5;
+        let edge = (p.0 - ear[0].0.min(tip.0)).abs();
+        let lit = if left { (1.0 - edge / 0.05).clamp(0.0, 1.0) } else { 0.0 };
+        mix(c, RIM, lit * 0.85 + (1.0 - along) * 0.15)
+    } else {
+        [0.0; 3]
+    };
+    let inside = d2 <= 1.0 || EARS.iter().any(|ear| in_triangle(ear, p));
+    let sparkle = if with_star { star(p, (0.86, 0.16), 0.11) } else { 0.0 };
+    match (inside, sparkle > 0.0) {
+        (true, _) => Some((mix(color, [255.0, 240.0, 255.0], sparkle), 1.0)),
+        (false, true) => Some(([255.0, 214.0, 250.0], sparkle)),
+        (false, false) => None,
     }
-    true
 }
 
-/// Distance from `p` to the segment `a`-`b`.
-fn segment_distance(p: Point, a: Point, b: Point) -> f32 {
-    let (dx, dy) = (b.0 - a.0, b.1 - a.1);
-    let t = (((p.0 - a.0) * dx + (p.1 - a.1) * dy) / (dx * dx + dy * dy)).clamp(0.0, 1.0);
-    let (x, y) = (a.0 + t * dx - p.0, a.1 + t * dy - p.1);
-    (x * x + y * y).sqrt()
-}
-
-fn mix(a: [f32; 4], b: [f32; 4], t: f32) -> [f32; 4] {
-    [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t, a[3] + (b[3] - a[3]) * t]
-}
-
-/// The colour of the logo at `p` (unit square), or `None` outside it. `px` is one pixel in
-/// unit lengths, so the rims keep a visible width at every size.
-fn shade(p: Point, px: f32) -> Option<[f32; 4]> {
-    let facet = FACETS.iter().find(|f| inside(f.corners, p))?;
-    let (min_y, max_y) = facet.corners.iter().fold((1.0f32, 0.0f32), |(lo, hi), c| (lo.min(c.1), hi.max(c.1)));
-    let mut color = mix(facet.top, facet.bottom, ((p.1 - min_y) / (max_y - min_y)).clamp(0.0, 1.0));
-
-    // Glass rims: a light line along the outline, brighter towards the top.
-    let rim_width = (0.035f32).max(1.2 * px);
-    let to_outline = (0..6).map(|i| segment_distance(p, OUTLINE[i], OUTLINE[(i + 1) % 6])).fold(f32::MAX, f32::min);
-    let rim = (1.0 - to_outline / rim_width).clamp(0.0, 1.0);
-    let rim_strength = 0.75 - 0.4 * p.1;
-    color = mix(color, [255.0, 255.0, 255.0, 255.0], rim * rim * rim_strength);
-
-    // Seams between facets: thinner and softer than the rim.
-    let seam_width = (0.012f32).max(0.7 * px);
-    let to_seam = SEAMS.iter().map(|&(a, b)| segment_distance(p, a, b)).fold(f32::MAX, f32::min);
-    let seam = (1.0 - to_seam / seam_width).clamp(0.0, 1.0);
-    color = mix(color, [255.0, 255.0, 255.0, 255.0], seam * 0.45);
-
-    // A soft specular glow on the upper left of the top face.
-    let (gx, gy) = ((p.0 - 0.36) / 0.22, (p.1 - 0.2) / 0.1);
-    let glow = (1.0 - (gx * gx + gy * gy).sqrt()).clamp(0.0, 1.0);
-    color = mix(color, [255.0, 255.0, 255.0, 255.0], glow * glow * 0.35);
-    Some(color)
-}
-
-/// RGBA pixels of a `size` x `size` icon.
+/// RGBA pixels of a `size` x `size` icon. The star is left out below 24 px, where it is noise.
 pub fn rgba(size: u32) -> Vec<u8> {
     const SAMPLES: u32 = 4;
     let px = 1.0 / size as f32;
@@ -109,8 +94,7 @@ pub fn rgba(size: u32) -> Vec<u8> {
                         (x as f32 + (sx as f32 + 0.5) / SAMPLES as f32) * px,
                         (y as f32 + (sy as f32 + 0.5) / SAMPLES as f32) * px,
                     );
-                    if let Some(c) = shade(p, px) {
-                        let a = c[3] / 255.0;
+                    if let Some((c, a)) = shade(p, size >= 24) {
                         acc[0] += c[0] * a;
                         acc[1] += c[1] * a;
                         acc[2] += c[2] * a;
@@ -139,8 +123,8 @@ mod tests {
         let (size, px) = (32u32, rgba(32));
         assert_eq!(px.len(), (size * size * 4) as usize);
         let alpha = |x: u32, y: u32| px[((y * size + x) * 4 + 3) as usize];
-        assert_eq!(alpha(0, 0), 0, "corner is transparent");
-        assert!(alpha(size / 2, size / 2) > 200, "centre is nearly opaque");
+        assert_eq!(alpha(0, size - 1), 0, "bottom-left corner is transparent");
+        assert_eq!(alpha(size / 2, size / 2 + 2), 255, "the orb is opaque");
     }
 
     /// `PURPLE_ICON_PREVIEW=<dir> cargo test -p purple icon` writes the icon at several sizes,

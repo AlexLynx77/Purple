@@ -129,7 +129,8 @@ fn build(champion: u32, skin: u32) -> Result<()> {
     let started = Instant::now();
     let game_dir = lcu::game_dir()?;
     let alias = catalog::champion_alias(champion, Lcu::connect().ok().as_ref());
-    let (fantome, source) = store::ensure_fantome(&game_dir, alias.as_deref(), champion, skin)?;
+    let parent = Catalog::load_cached().and_then(|c| c.chroma_parent(skin).map(|s| s.id));
+    let (fantome, source) = store::ensure_fantome(&game_dir, alias.as_deref(), champion, skin, parent)?;
     println!("skin file ({source:?}): {}", fantome.display());
     let overlay = overlay::build(&fantome, skin, &game_dir)?;
     println!("overlay ready in {:.1}s: {}", started.elapsed().as_secs_f32(), overlay.display());
