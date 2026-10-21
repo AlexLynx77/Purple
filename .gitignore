@@ -9,3 +9,9 @@
 # Skin files and game archives never belong in the repo
 *.fantome
 *.wad.client
+/vendor/ltk-patcher/PATCHER-VERSION.txt
+
+# Local context for AI agents (machine-specific)
+CLAUDE.md
+CLAUDE.local.md
+AGENTS.md

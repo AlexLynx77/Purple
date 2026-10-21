@@ -1,7 +1,8 @@
 //! Local data directory and the skin file cache.
 //!
 //! Skins are small `.fantome` archives fetched on demand from the LeagueSkins repository
-//! and kept under `<data>/skins/<champion id>/<skin id>.fantome`.
+//! and kept under `<data>/skins/<champion id>/<skin id>.fantome` (with its `ETag` next to it, so a
+//! file regenerated upstream for a new game patch is fetched again).
 
 use anyhow::{bail, Context, Result};
 use std::fs;
@@ -80,36 +81,70 @@ fn fantome_path(champion_id: u32, skin_id: u32) -> Result<PathBuf> {
     Ok(data_dir()?.join("skins").join(champion_id.to_string()).join(format!("{skin_id}.fantome")))
 }
 
-/// Returns the cached `.fantome` for a skin, downloading it first when it is not cached yet.
+/// Returns the `.fantome` for a skin, downloading it when it is missing or has changed upstream.
+///
+/// LeagueSkins regenerates its files for every game patch, so a cached copy can go stale. Each
+/// call asks GitHub whether the file changed (conditional request on the saved `ETag`, ~1 small
+/// request per arm). When GitHub cannot be reached, the cached copy is used as is.
 pub fn ensure_fantome(champion_id: u32, skin_id: u32) -> Result<PathBuf> {
     let path = fantome_path(champion_id, skin_id)?;
-    if path.exists() {
-        return Ok(path);
+    let etag_path = path.with_extension("etag");
+    let cached_etag = if path.exists() { fs::read_to_string(&etag_path).ok() } else { None };
+    match download_fantome(champion_id, skin_id, cached_etag.as_deref().map(str::trim)) {
+        Ok(Download::Unchanged) => Ok(path),
+        Ok(Download::New { bytes, etag }) => {
+            fs::create_dir_all(path.parent().context("cache path has no parent")?)?;
+            let part = path.with_extension("part");
+            fs::write(&part, &bytes)?;
+            fs::rename(&part, &path)?;
+            match etag {
+                Some(etag) => fs::write(&etag_path, etag)?,
+                None => {
+                    let _ = fs::remove_file(&etag_path);
+                }
+            }
+            Ok(path)
+        }
+        Err(e) if path.exists() => {
+            log(&format!("using cached skin {skin_id}, could not check for an update: {e:#}"));
+            Ok(path)
+        }
+        Err(e) => Err(e),
     }
+}
+
+enum Download {
+    Unchanged,
+    New { bytes: Vec<u8>, etag: Option<String> },
+}
+
+fn download_fantome(champion_id: u32, skin_id: u32, etag: Option<&str>) -> Result<Download> {
     let url = format!("{SKINS_BASE_URL}/{champion_id}/{skin_id}/{skin_id}.fantome");
     let agent = ureq::AgentBuilder::new()
         .tls_connector(Arc::new(native_tls::TlsConnector::new()?))
         .timeout_connect(Duration::from_secs(10))
         .timeout_read(Duration::from_secs(30))
         .build();
-    let resp = match agent.get(&url).call() {
+    let mut request = agent.get(&url);
+    if let Some(etag) = etag {
+        request = request.set("If-None-Match", etag);
+    }
+    let resp = match request.call() {
+        Ok(r) if r.status() == 304 => return Ok(Download::Unchanged),
         Ok(r) => r,
         Err(ureq::Error::Status(404, _)) => {
             bail!("no skin file for {skin_id} in the LeagueSkins repository ({url})")
         }
         Err(e) => return Err(e).with_context(|| format!("downloading {url}")),
     };
+    let etag = resp.header("ETag").map(str::to_owned);
     let mut bytes = Vec::new();
     resp.into_reader().take(64 * 1024 * 1024).read_to_end(&mut bytes)?;
     // A .fantome is a zip. Anything else (e.g. an HTML error page) must never reach the cache.
     if !bytes.starts_with(b"PK") {
         bail!("{url} did not return a zip archive");
     }
-    fs::create_dir_all(path.parent().context("cache path has no parent")?)?;
-    let part = path.with_extension("part");
-    fs::write(&part, &bytes)?;
-    fs::rename(&part, &path)?;
-    Ok(path)
+    Ok(Download::New { bytes, etag })
 }
 
 /// Removes every file in `dir` except the entry named `keep` (best effort: locked files stay).

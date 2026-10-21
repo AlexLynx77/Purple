@@ -5,14 +5,21 @@
 # release, and they stop working on game versions newer than their built-in end-of-life date,
 # so run this again when Purple reports that the patcher is too old.
 #
-#   .\scripts\get-patcher.ps1                        # into vendor\ltk-patcher
+#   .\scripts\get-patcher.ps1                        # latest stable LTK Manager release, into vendor\ltk-patcher
+#   .\scripts\get-patcher.ps1 -Ref main              # newest files, possibly not released yet
 #   .\scripts\get-patcher.ps1 -Destination C:\x      # somewhere else
+#
+# What was fetched (release, date, SHA-256) is written to PATCHER-VERSION.txt next to the files.
 param(
     [string]$Destination = (Join-Path (Split-Path $PSScriptRoot -Parent) "vendor\ltk-patcher"),
-    [string]$Ref = "main"
+    [string]$Ref = "latest"
 )
 
 $ErrorActionPreference = "Stop"
+if ($Ref -eq "latest") {
+    $Ref = (Invoke-RestMethod "https://api.github.com/repos/LeagueToolkit/ltk-manager/releases/latest" -UseBasicParsing).tag_name
+}
+"Fetching the patcher from LeagueToolkit/ltk-manager@$Ref"
 $source = "https://github.com/LeagueToolkit/ltk-manager/raw/$Ref"
 New-Item -ItemType Directory -Force $Destination | Out-Null
 
@@ -30,4 +37,9 @@ foreach ($file in "ltk_patcher_host.exe", "ltk_patcher_dll.dll") {
 }
 
 Invoke-WebRequest "$source/LTK-PATCHER-LICENSE.md" -OutFile (Join-Path $Destination "LTK-PATCHER-LICENSE.md") -UseBasicParsing
+$version = @("source:  LeagueToolkit/ltk-manager@$Ref", "fetched: $(Get-Date -Format 'yyyy-MM-dd')")
+foreach ($file in "ltk_patcher_host.exe", "ltk_patcher_dll.dll") {
+    $version += "{0}  {1}" -f (Get-FileHash (Join-Path $Destination $file) -Algorithm SHA256).Hash.ToLower(), $file
+}
+$version | Set-Content (Join-Path $Destination "PATCHER-VERSION.txt") -Encoding ascii
 "Patcher ready in $Destination"

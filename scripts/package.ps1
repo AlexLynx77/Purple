@@ -37,6 +37,6 @@ New-Item -ItemType Directory -Force (Join-Path $dist "patcher") | Out-Null
 foreach ($exe in "purple.exe", "purple-ui.exe", "purplectl.exe") {
     Copy-Item (Join-Path $root "target\release\$exe") $dist
 }
-Copy-Item (Join-Path $patcher "*") (Join-Path $dist "patcher") -Include "*.exe", "*.dll", "*.md"
+Copy-Item (Join-Path $patcher "*") (Join-Path $dist "patcher") -Include "*.exe", "*.dll", "*.md", "*.txt"
 Get-ChildItem $dist -Recurse -File | ForEach-Object { "{0,-50} {1,8:N1} MB" -f $_.FullName.Substring($dist.Length + 1), ($_.Length / 1MB) }
 "Ready: $dist\purple.exe"
