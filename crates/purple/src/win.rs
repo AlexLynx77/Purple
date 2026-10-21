@@ -129,26 +129,51 @@ pub fn focus_window(title: &str) -> bool {
     }
 }
 
-fn sibling_exe(name: &str) -> Result<std::path::PathBuf> {
+/// Asks the top-level window titled `title` to close, if there is one.
+pub fn close_window(title: &str) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{PostMessageW, WM_CLOSE};
+    let title = wide(title);
+    // SAFETY: `title` is NUL-terminated and outlives the calls; WM_CLOSE carries no payload.
+    unsafe {
+        let window = FindWindowW(std::ptr::null(), title.as_ptr());
+        if !window.is_null() {
+            PostMessageW(window, WM_CLOSE, 0, 0);
+        }
+    }
+}
+
+/// Starts this same program again with `arg`, without a console.
+fn spawn_self(arg: &str) -> Result<()> {
     let exe = std::env::current_exe().context("locating the running program")?;
-    Ok(exe.with_file_name(name))
-}
-
-/// Opens the window (`purple-ui.exe`, next to this program).
-pub fn spawn_ui() -> Result<()> {
-    let path = sibling_exe("purple-ui.exe")?;
-    Command::new(&path).spawn().with_context(|| format!("starting {}", path.display()))?;
-    Ok(())
-}
-
-/// Starts the tray program (`purple.exe`, next to this program) without a console.
-pub fn spawn_daemon() -> Result<()> {
-    let path = sibling_exe("purple.exe")?;
-    Command::new(&path)
+    Command::new(&exe)
+        .arg(arg)
         .creation_flags(CREATE_NO_WINDOW)
         .spawn()
-        .with_context(|| format!("starting {}", path.display()))?;
+        .with_context(|| format!("starting {} {arg}", exe.display()))?;
     Ok(())
+}
+
+/// Argument that makes `purple.exe` open only the window.
+pub const WINDOW_ARG: &str = "--window";
+/// Argument that makes `purple.exe` start in the notification area without opening the window.
+pub const BACKGROUND_ARG: &str = "--background";
+
+/// Opens the window in its own process, so its memory is released when it is closed.
+pub fn spawn_ui() -> Result<()> {
+    spawn_self(WINDOW_ARG)
+}
+
+/// Starts the resident program (engine + notification-area icon) without opening a window.
+pub fn spawn_daemon() -> Result<()> {
+    spawn_self(BACKGROUND_ARG)
+}
+
+/// Lets a command-line run print to the terminal it was started from. The release build is a
+/// windowed program, which Windows starts without a console.
+pub fn attach_parent_console() {
+    use windows_sys::Win32::System::Console::{AttachConsole, ATTACH_PARENT_PROCESS};
+    // SAFETY: no preconditions; failure (no parent console) is harmless.
+    unsafe { AttachConsole(ATTACH_PARENT_PROCESS) };
 }
 
 pub fn current_thread_id() -> u32 {

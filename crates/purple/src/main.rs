@@ -1,12 +1,15 @@
-//! Purple's resident program: the engine plus a notification-area icon.
+//! `purple.exe`: the only program of Purple.
 //!
-//! It stays small on purpose. The window (`purple-ui.exe`) is a separate program opened from the
-//! icon, so its memory is released whenever it is closed.
+//! - `purple.exe` starts the resident part (engine + notification-area icon) and opens the window.
+//!   Closing the window leaves Purple running; it quits from the icon's menu.
+//! - The window runs as a second process of the same program (`purple.exe --window`), so its memory
+//!   (~100 MB) is released whenever it is closed while the resident part stays at ~15 MB.
+//! - `purple.exe <command>` is the command line (see `purple.exe help`).
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use purple::engine::{self, Event};
 use purple::status::Status;
-use purple::{icon, store, win};
+use purple::{cli, icon, store, win};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -14,11 +17,42 @@ use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
 use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 
 fn main() {
-    let Some(_instance) = win::single_instance(win::DAEMON_MUTEX) else {
-        // Already running: a second launch just opens the window.
-        let _ = win::spawn_ui();
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    match args.first().map(String::as_str) {
+        Some(win::WINDOW_ARG) => window(),
+        Some(command) if cli::COMMANDS.contains(&command) => {
+            win::attach_parent_console();
+            if let Err(e) = cli::run_command(&args) {
+                eprintln!("{e:#}");
+                std::process::exit(1);
+            }
+        }
+        first => resident(first != Some(win::BACKGROUND_ARG)),
+    }
+}
+
+/// The window process (`purple.exe --window`), started by the resident program.
+fn window() {
+    let Some(_instance) = win::single_instance(win::UI_MUTEX) else {
+        // The window is already open: bring it forward instead of opening a second one.
+        win::focus_window(win::WINDOW_TITLE);
         return;
     };
+    if let Err(e) = purple::gui::run() {
+        store::log(&format!("window: {e}"));
+    }
+}
+
+/// The resident program: engine + notification-area icon, plus the window unless `--background`.
+fn resident(open_window: bool) {
+    let instance = win::single_instance(win::DAEMON_MUTEX);
+    if open_window {
+        // Already running or not, a launch shows the window.
+        if let Err(e) = win::spawn_ui() {
+            store::log(&format!("could not open the window: {e:#}"));
+        }
+    }
+    let Some(_instance) = instance else { return };
     store::trim_log();
     if let Err(e) = run() {
         store::log(&format!("fatal: {e:#}"));
@@ -129,6 +163,8 @@ fn run() -> anyhow::Result<()> {
         false
     });
 
+    // Quitting from the icon also closes the window.
+    win::close_window(win::WINDOW_TITLE);
     stop.store(true, Ordering::Relaxed);
     let _ = engine_thread.join();
     let _ = Status::default().write();

@@ -1,12 +1,12 @@
 //! Drives `ltk_patcher_host.exe` over its line protocol (commands on stdin, events on stdout).
 //!
 //! The host injects `ltk_patcher_dll.dll` into the game; the DLL makes the game read the
-//! overlay in place of its own WAD files. See NOTES.md for the protocol.
+//! overlay in place of its own WAD files. The binaries are managed by `patcher_install`.
 
 use crate::{store, win};
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 use std::io::{BufRead, BufReader, Write};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc::{self, Receiver};
 use std::sync::OnceLock;
@@ -30,25 +30,6 @@ pub struct Host {
     child: Child,
     stdin: ChildStdin,
     pub events: Receiver<Event>,
-}
-
-/// Where the patcher binaries live: `$PURPLE_PATCHER_DIR`, `<exe dir>/patcher`, or the repo's vendor dir.
-pub fn locate() -> Result<PathBuf> {
-    let mut candidates = Vec::new();
-    if let Some(dir) = std::env::var_os("PURPLE_PATCHER_DIR") {
-        candidates.push(PathBuf::from(dir));
-    }
-    if let Some(dir) = std::env::current_exe().ok().and_then(|p| p.parent().map(Path::to_path_buf)) {
-        candidates.push(dir.join("patcher"));
-    }
-    candidates.push(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../vendor/ltk-patcher"));
-    for dir in candidates {
-        let exe = dir.join("ltk_patcher_host.exe");
-        if exe.exists() && dir.join("ltk_patcher_dll.dll").exists() {
-            return Ok(exe);
-        }
-    }
-    bail!("ltk_patcher_host.exe + ltk_patcher_dll.dll not found (set PURPLE_PATCHER_DIR)")
 }
 
 impl Host {

@@ -3,6 +3,7 @@ name = "purple"
 version = "0.1.0"
 edition = "2021"
 description = "Skin changer for League of Legends"
+build = "build.rs"
 
 [lib]
 name = "purple"
@@ -12,14 +13,6 @@ path = "src/lib.rs"
 name = "purple"
 path = "src/main.rs"
 
-[[bin]]
-name = "purple-ui"
-path = "src/bin/purple-ui.rs"
-
-[[bin]]
-name = "purplectl"
-path = "src/bin/purplectl.rs"
-
 [dependencies]
 anyhow = "1"
 base64 = "0.22"
@@ -27,7 +20,9 @@ camino = "1.1"
 eframe = { version = "0.37", default-features = false, features = ["glow", "default_fonts"] }
 egui = { version = "0.37", default-features = false }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+ltk_hash = "0.5"
 ltk_overlay = "0.17.0"
+ltk_wad = "0.5"
 native-tls = "0.2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -35,4 +30,8 @@ tray-icon = "0.26.1"
 ureq = { version = "2", default-features = false, features = ["native-tls", "json"] }
 # zip 2.6.1 breaks ltk_fantome 0.15.5 (semver break upstream): keep it pinned until LeagueToolkit fixes it.
 zip = { version = "=2.4.2", default-features = false }
-windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging"] }
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_WinTrust", "Win32_System_Console", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging"] }
+
+[build-dependencies]
+png = "0.18"
+winresource = "0.1"

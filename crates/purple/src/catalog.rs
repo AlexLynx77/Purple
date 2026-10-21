@@ -41,9 +41,18 @@ fn cache_path() -> Result<PathBuf> {
 
 impl Catalog {
     pub fn load(lcu: &Lcu) -> Result<Self> {
-        let champs = lcu
-            .get("/lol-game-data/assets/v1/champion-summary.json")?
-            .context("champion-summary.json not available")?;
+        let get = |path: &str| lcu.get(path)?.with_context(|| format!("{path} not available"));
+        Self::from_sources(get)
+    }
+
+    /// The catalog read from the client's files on disk (works with the client closed).
+    pub fn load_from_files() -> Result<Self> {
+        let assets = std::cell::RefCell::new(crate::client_assets::ClientAssets::open()?);
+        Self::from_sources(|path| Ok(serde_json::from_slice(&assets.borrow_mut().get(path)?)?))
+    }
+
+    fn from_sources(get: impl Fn(&str) -> Result<Value>) -> Result<Self> {
+        let champs = get("/lol-game-data/assets/v1/champion-summary.json")?;
         let mut champions: Vec<Champion> = champs
             .as_array()
             .context("champion-summary is not an array")?
@@ -52,9 +61,7 @@ impl Catalog {
             .collect();
         champions.sort_by_key(|c| c.name.to_lowercase());
 
-        let skins_json = lcu
-            .get("/lol-game-data/assets/v1/skins.json")?
-            .context("skins.json not available")?;
+        let skins_json = get("/lol-game-data/assets/v1/skins.json")?;
         let mut skins: Vec<Skin> = skins_json
             .as_object()
             .context("skins.json is not an object")?

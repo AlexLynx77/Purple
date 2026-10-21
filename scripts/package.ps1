@@ -1,13 +1,9 @@
-# Builds Purple and assembles a ready-to-run folder: dist\Purple
+# Builds Purple and puts the ready-to-run program in dist\
 #
-#   .\scripts\package.ps1              # build (release) then assemble
-#   .\scripts\package.ps1 -SkipBuild   # only assemble from the last build
+#   .\scripts\package.ps1              # build (release), then copy
+#   .\scripts\package.ps1 -SkipBuild   # only copy the last build
 #
-# Layout of the result (the three programs must stay together):
-#   purple.exe       the resident program (engine + tray icon): the one to start
-#   purple-ui.exe    the window, opened from the tray icon
-#   purplectl.exe    command line (diagnostics)
-#   patcher\         ltk_patcher_host.exe, ltk_patcher_dll.dll (see scripts\get-patcher.ps1)
+# Purple is a single program, dist\purple.exe. It downloads LTK Patcher by itself on first run.
 param([switch]$SkipBuild)
 
 $ErrorActionPreference = "Stop"
@@ -24,19 +20,9 @@ if (-not $SkipBuild) {
     if ($buildFailed) { throw "cargo build failed" }
 }
 
-$patcher = Join-Path $root "vendor\ltk-patcher"
-foreach ($file in "ltk_patcher_host.exe", "ltk_patcher_dll.dll") {
-    if (-not (Test-Path (Join-Path $patcher $file))) {
-        throw "$file is missing from vendor\ltk-patcher: run .\scripts\get-patcher.ps1 first"
-    }
-}
-
-$dist = Join-Path $root "dist\Purple"
+$dist = Join-Path $root "dist"
 if (Test-Path $dist) { Remove-Item $dist -Recurse -Force }
-New-Item -ItemType Directory -Force (Join-Path $dist "patcher") | Out-Null
-foreach ($exe in "purple.exe", "purple-ui.exe", "purplectl.exe") {
-    Copy-Item (Join-Path $root "target\release\$exe") $dist
-}
-Copy-Item (Join-Path $patcher "*") (Join-Path $dist "patcher") -Include "*.exe", "*.dll", "*.md", "*.txt"
-Get-ChildItem $dist -Recurse -File | ForEach-Object { "{0,-50} {1,8:N1} MB" -f $_.FullName.Substring($dist.Length + 1), ($_.Length / 1MB) }
-"Ready: $dist\purple.exe"
+New-Item -ItemType Directory -Force $dist | Out-Null
+Copy-Item (Join-Path $root "target\release\purple.exe") $dist
+$exe = Get-Item (Join-Path $dist "purple.exe")
+"{0}  {1:N1} MB" -f $exe.FullName, ($exe.Length / 1MB)

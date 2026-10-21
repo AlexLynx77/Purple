@@ -62,6 +62,7 @@ impl Status {
                 _ => {}
             },
             Event::PatcherOutdated(_) => self.patcher_outdated = true,
+            Event::PatcherUpdated(_) => self.patcher_outdated = false,
             Event::OverlayUnreadable(_) => self.overlay_unreadable = true,
             Event::Error(message) => self.error = Some(message.clone()),
             Event::Game { .. } => {}

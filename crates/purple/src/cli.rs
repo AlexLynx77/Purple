@@ -1,15 +1,18 @@
-//! Command-line front end: inspect the client, choose skins, run the engine in a terminal.
+//! Command-line mode of `purple.exe`: inspect the client, choose skins, run the engine in a terminal.
 
+use crate::catalog::Catalog;
+use crate::config::Config;
+use crate::engine::{self, Event};
+use crate::lcu::{self, Lcu};
+use crate::{overlay, patcher_install, store};
 use anyhow::{bail, Context, Result};
-use purple::catalog::Catalog;
-use purple::config::Config;
-use purple::engine::{self, Event};
-use purple::lcu::{self, Lcu};
-use purple::{overlay, store};
 use std::sync::atomic::AtomicBool;
 use std::time::Instant;
 
-const USAGE: &str = "usage: purplectl <command>
+const USAGE: &str = "usage: purple [command]
+
+  (no command)                open the window and keep Purple running in the notification area
+  --background                start in the notification area only, without opening the window
 
   status                      client connection and game phase
   skins <champion>            list a champion's skins (id, name)
@@ -18,11 +21,16 @@ const USAGE: &str = "usage: purplectl <command>
   list                        show the configured skins
   run                         wait for champion select and apply the configured skin
   build <champ id> <skin id>  fetch a skin and build its overlay (no client needed; for testing)
+  update-patcher              download the latest LTK Patcher release if it is newer
 
 Set PURPLE_DEBUG=1 for the patcher's full logs.";
 
-fn main() -> Result<()> {
-    let args: Vec<String> = std::env::args().skip(1).collect();
+/// Command names handled here (anything else starts the program normally).
+pub const COMMANDS: [&str; 10] =
+    ["status", "skins", "set", "unset", "list", "run", "build", "update-patcher", "help", "--help"];
+
+/// Runs one command; `args` excludes the program name.
+pub fn run_command(args: &[String]) -> Result<()> {
     let arg = |i: usize| args.get(i).map(String::as_str);
     match (arg(0), arg(1), arg(2)) {
         (Some("status"), ..) => status(),
@@ -32,10 +40,16 @@ fn main() -> Result<()> {
         (Some("list"), ..) => list(),
         (Some("run"), ..) => run(),
         (Some("build"), Some(champ), Some(skin)) => build(champ.parse()?, skin.parse()?),
-        _ => {
-            eprintln!("{USAGE}");
-            std::process::exit(2);
+        (Some("update-patcher"), ..) => {
+            let host = patcher_install::ensure(true)?;
+            println!("patcher ready: {}", host.display());
+            Ok(())
         }
+        (Some("help" | "--help"), ..) => {
+            println!("{USAGE}");
+            Ok(())
+        }
+        _ => bail!("{USAGE}"),
     }
 }
 
@@ -67,7 +81,7 @@ fn set(champion: &str, skin: &str) -> Result<()> {
         .collect();
     let chosen = match matches.as_slice() {
         [one] => *one,
-        [] => bail!("no skin of {} matches {skin:?} (see `purplectl skins {}`)", champ.name, champ.name),
+        [] => bail!("no skin of {} matches {skin:?} (see `purple skins {}`)", champ.name, champ.name),
         many => {
             let names: Vec<String> = many.iter().map(|s| format!("{} ({})", s.name, s.id)).collect();
             bail!("{skin:?} is ambiguous: {}", names.join(", "))
@@ -97,7 +111,7 @@ fn list() -> Result<()> {
     let cfg = Config::load()?;
     let catalog = Lcu::connect().ok().and_then(|l| Catalog::load(&l).ok()).or_else(Catalog::load_cached);
     if cfg.skins.is_empty() {
-        println!("no skin configured (see `purplectl set`)");
+        println!("no skin configured (see `purple set`)");
     }
     for (champ, skin) in &cfg.skins {
         let champ_name = catalog.as_ref().and_then(|c| c.champion(&champ.to_string())).map(|c| c.name.clone());
@@ -127,7 +141,7 @@ fn run() -> Result<()> {
         Event::ClientLost => println!("client closed"),
         Event::Phase(phase) => println!("phase: {phase}"),
         Event::Armed { champion, skin, seconds } => println!("armed skin {skin} for champion {champion} ({seconds:.1}s)"),
-        Event::NoSkin { champion } => println!("no skin configured for champion {champion} (use `purplectl set`)"),
+        Event::NoSkin { champion } => println!("no skin configured for champion {champion} (use `purple set`)"),
         Event::SessionEnded => println!("session ended"),
         Event::Patcher { state, message } => println!("patcher: {state} {message}"),
         Event::Game { level, message } => {
@@ -135,8 +149,9 @@ fn run() -> Result<()> {
                 println!("game: {level} {message}");
             }
         }
+        Event::PatcherUpdated(version) => println!("patcher updated to {version}"),
         Event::PatcherOutdated(message) => {
-            eprintln!("patcher is too old for this game build: update ltk_patcher_host.exe + ltk_patcher_dll.dll ({message})");
+            eprintln!("patcher is too old for this game build, updating it before the next game ({message})");
         }
         Event::OverlayUnreadable(message) => {
             eprintln!("the game could not read the overlay, so no skin will show: {message}");

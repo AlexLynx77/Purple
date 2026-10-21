@@ -1,8 +1,12 @@
-//! Loads champion portraits and skin tiles from the League client, with a disk cache.
+//! Loads champion portraits and skin tiles, with a disk cache.
+//!
+//! Pictures are read from the client's files on disk (see `client_assets`), so the window is
+//! complete even with the client closed; the running client is the fallback.
 //!
 //! A worker thread fetches and decodes (so the window never blocks) and the UI thread turns the
 //! decoded pixels into textures. Textures are capped so browsing every champion does not grow memory.
 
+use crate::client_assets::ClientAssets;
 use crate::lcu::Lcu;
 use crate::store;
 use egui::{ColorImage, Context, TextureHandle, TextureOptions};
@@ -99,9 +103,9 @@ impl Images {
 }
 
 fn worker(requests: &Receiver<Request>, results: &Sender<Loaded>, ctx: &Context) {
-    let mut lcu: Option<Lcu> = None;
+    let mut sources = Sources { files: ClientAssets::open().ok(), lcu: None };
     for request in requests {
-        let image = load(&request, &mut lcu);
+        let image = load(&request, &mut sources);
         if results.send(Loaded { path: request.path, image }).is_err() {
             break;
         }
@@ -114,20 +118,37 @@ fn cache_file(path: &str) -> Option<PathBuf> {
     Some(store::data_dir().ok()?.join("img").join(name))
 }
 
-fn load(request: &Request, lcu: &mut Option<Lcu>) -> Option<ColorImage> {
+/// Where pictures come from: the client's files first, then the running client.
+struct Sources {
+    files: Option<ClientAssets>,
+    lcu: Option<Lcu>,
+}
+
+impl Sources {
+    fn get(&mut self, path: &str) -> Option<Vec<u8>> {
+        if let Some(bytes) = self.files.as_mut().and_then(|f| f.get(path).ok()) {
+            return Some(bytes);
+        }
+        if self.lcu.is_none() {
+            self.lcu = Lcu::connect().ok();
+        }
+        match self.lcu.as_ref()?.get_bytes(path) {
+            Ok(bytes) => Some(bytes),
+            Err(_) => {
+                // The client may have restarted on another port: reconnect on the next request.
+                self.lcu = None;
+                None
+            }
+        }
+    }
+}
+
+fn load(request: &Request, sources: &mut Sources) -> Option<ColorImage> {
     let cache = cache_file(&request.path)?;
     let bytes = match std::fs::read(&cache) {
         Ok(bytes) => bytes,
         Err(_) => {
-            if lcu.is_none() {
-                *lcu = Lcu::connect().ok();
-            }
-            let fetched = lcu.as_ref()?.get_bytes(&request.path);
-            let Ok(bytes) = fetched else {
-                // The client may have restarted on another port: reconnect on the next request.
-                *lcu = None;
-                return None;
-            };
+            let bytes = sources.get(&request.path)?;
             if let Some(dir) = cache.parent() {
                 let _ = std::fs::create_dir_all(dir);
             }

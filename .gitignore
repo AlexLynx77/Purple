@@ -2,14 +2,9 @@
 /target
 /dist
 
-# Third-party binaries are fetched by scripts/get-patcher.ps1, not committed
-/vendor/ltk-patcher/*.exe
-/vendor/ltk-patcher/*.dll
-
 # Skin files and game archives never belong in the repo
 *.fantome
 *.wad.client
-/vendor/ltk-patcher/PATCHER-VERSION.txt
 
 # Local context for AI agents (machine-specific)
 CLAUDE.md

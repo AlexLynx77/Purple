@@ -4,9 +4,9 @@
 
 use crate::config::Config;
 use crate::lcu::Lcu;
-use crate::{overlay, patcher, store};
+use crate::{overlay, patcher, patcher_install, store};
 use anyhow::Result;
-use std::path::Path;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -25,6 +25,8 @@ pub enum Event {
     Game { level: String, message: String },
     /// The patcher binaries refuse this game build and must be updated.
     PatcherOutdated(String),
+    /// A different patcher is now in use (first download or update).
+    PatcherUpdated(String),
     /// The game could not read the overlay, so no skin will show.
     OverlayUnreadable(String),
     Error(String),
@@ -46,23 +48,57 @@ fn local_champion(lcu: &Lcu) -> Result<u32> {
     Ok(u32::try_from(champion).unwrap_or(0))
 }
 
+/// The patcher host process and what is known about its binaries.
+#[derive(Default)]
+struct Patcher {
+    host: Option<patcher::Host>,
+    exe: Option<PathBuf>,
+    /// The DLL reported that it is too old for this game: look for a newer release before the next game.
+    stale: bool,
+}
+
+impl Patcher {
+    /// Makes sure a patcher is installed (and updated when stale) and its host is running.
+    fn ready(&mut self, emit: &mut dyn FnMut(Event)) -> Result<&mut patcher::Host> {
+        if self.exe.is_none() || self.stale {
+            let exe = patcher_install::ensure(self.stale)?;
+            if self.exe.as_ref() != Some(&exe) {
+                self.host = None; // dropping it stops the old host
+                let version = exe.parent().and_then(|d| d.file_name()).map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+                if self.exe.is_some() {
+                    emit(Event::PatcherUpdated(version));
+                }
+                self.exe = Some(exe);
+            }
+            self.stale = false;
+        }
+        if !self.host.as_mut().is_some_and(patcher::Host::is_alive) {
+            self.host = Some(patcher::Host::spawn(self.exe.as_ref().expect("set above"))?);
+        }
+        Ok(self.host.as_mut().expect("host was just spawned"))
+    }
+
+    fn stop_session(&mut self) {
+        if let Some(h) = self.host.as_mut() {
+            let _ = h.stop_session();
+        }
+    }
+}
+
 /// Builds the overlay for `skin` and points the patcher at it. Returns the time it took.
-fn arm(lcu: &Lcu, champion: u32, skin: u32, host: &mut Option<patcher::Host>, host_exe: &Path) -> Result<f32> {
+fn arm(lcu: &Lcu, champion: u32, skin: u32, patcher: &mut Patcher, emit: &mut dyn FnMut(Event)) -> Result<f32> {
     let started = Instant::now();
     let fantome = store::ensure_fantome(champion, skin)?;
     let overlay = overlay::build(&fantome, skin, &lcu.install_dir().join("Game"))?;
-    if !host.as_mut().is_some_and(patcher::Host::is_alive) {
-        *host = Some(patcher::Host::spawn(host_exe)?);
-    }
-    let host = host.as_mut().expect("host was just spawned");
+    let host = patcher.ready(emit)?;
     host.stop_session()?;
     host.start_scan(&overlay)?;
     Ok(started.elapsed().as_secs_f32())
 }
 
 /// Forwards what the patcher reports and keeps `in_game` true while it is attached to a game.
-fn forward_host_events(host: &mut Option<patcher::Host>, in_game: &mut bool, emit: &mut dyn FnMut(Event)) {
-    let Some(host) = host else { return };
+fn forward_host_events(patcher: &mut Patcher, in_game: &mut bool, emit: &mut dyn FnMut(Event)) {
+    let Some(host) = patcher.host.as_mut() else { return };
     while let Ok(event) = host.events.try_recv() {
         match event {
             patcher::Event::Status { state, message } => {
@@ -76,6 +112,7 @@ fn forward_host_events(host: &mut Option<patcher::Host>, in_game: &mut bool, emi
             patcher::Event::Error(message) => emit(Event::Error(format!("patcher: {message}"))),
             patcher::Event::Dll { level, message } => {
                 if message.contains("end of life") {
+                    patcher.stale = true;
                     emit(Event::PatcherOutdated(message.clone()));
                 } else if message.contains("overlay verified 0 wad") {
                     emit(Event::OverlayUnreadable(message.clone()));
@@ -88,8 +125,12 @@ fn forward_host_events(host: &mut Option<patcher::Host>, in_game: &mut bool, emi
 
 /// Runs until `stop` is set. Waits for the client, then follows champion select and the game.
 pub fn run(stop: &AtomicBool, emit: &mut dyn FnMut(Event)) -> Result<()> {
-    let host_exe = patcher::locate()?;
-    let mut host: Option<patcher::Host> = None;
+    let mut patcher = Patcher::default();
+    // Install the patcher, or update it, before the first game (not fatal: retried when arming).
+    match patcher_install::ensure(true) {
+        Ok(exe) => patcher.exe = Some(exe),
+        Err(e) => emit(Event::Error(format!("patcher: {e:#}"))),
+    }
     let mut armed = false;
     let mut in_game = false;
     let mut last_phase = String::new();
@@ -123,7 +164,7 @@ pub fn run(stop: &AtomicBool, emit: &mut dyn FnMut(Event)) -> Result<()> {
                         if last_key != Some((champion, wanted)) {
                             last_key = Some((champion, wanted));
                             match wanted {
-                                Some(skin) => match arm(&lcu, champion, skin, &mut host, &host_exe) {
+                                Some(skin) => match arm(&lcu, champion, skin, &mut patcher, emit) {
                                     Ok(seconds) => {
                                         armed = true;
                                         emit(Event::Armed { champion, skin, seconds });
@@ -132,9 +173,7 @@ pub fn run(stop: &AtomicBool, emit: &mut dyn FnMut(Event)) -> Result<()> {
                                 },
                                 None => {
                                     if std::mem::take(&mut armed) {
-                                        if let Some(h) = host.as_mut() {
-                                            let _ = h.stop_session();
-                                        }
+                                        patcher.stop_session();
                                     }
                                     emit(Event::NoSkin { champion });
                                 }
@@ -149,14 +188,12 @@ pub fn run(stop: &AtomicBool, emit: &mut dyn FnMut(Event)) -> Result<()> {
                     last_key = None;
                     // Never tear the patcher down while it is attached to a running game.
                     if !in_game && std::mem::take(&mut armed) {
-                        if let Some(h) = host.as_mut() {
-                            let _ = h.stop_session();
-                        }
+                        patcher.stop_session();
                         emit(Event::SessionEnded);
                     }
                 }
             }
-            forward_host_events(&mut host, &mut in_game, emit);
+            forward_host_events(&mut patcher, &mut in_game, emit);
             thread::sleep(Duration::from_secs(1));
         }
     }
