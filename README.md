@@ -1,4 +1,12 @@
-# Purple
+<p align="center">
+  <img src="docs/banner.png" alt="Purple — changeur de skins pour League of Legends" width="100%">
+</p>
+
+<p align="center">
+  <a href="https://github.com/AlexLynx77/Purple/releases/latest"><img src="https://img.shields.io/github/v/release/AlexLynx77/Purple?style=flat-square&color=8b5cf6&label=version" alt="Dernière version"></a>
+  <img src="https://img.shields.io/badge/Windows-10%20%7C%2011-555?style=flat-square" alt="Windows 10 | 11">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/licence-MIT-555?style=flat-square" alt="Licence MIT"></a>
+</p>
 
 Changeur de skins pour League of Legends. Un seul exécutable Windows, écrit en Rust.
 
@@ -209,7 +217,6 @@ Notes :
 ## Feuille de route
 
 - [ ] Formes spéciales (skins à plusieurs formes, skins Prestige à niveaux)
-- [ ] Licence du projet
 
 ## Crédits et licences
 
@@ -217,4 +224,5 @@ Notes :
   voir `LTK-PATCHER-LICENSE.md` dans [ltk-manager](https://github.com/LeagueToolkit/ltk-manager)).
 - [Alban1911/LeagueSkins](https://github.com/Alban1911/LeagueSkins) : fichiers de skins.
 
-Purple n'a pas encore de licence. League of Legends est une marque de Riot Games, Inc.
+Purple est distribué sous licence [MIT](LICENSE). Cette licence couvre le code de Purple, pas LTK Patcher ni les
+fichiers de skins, qui gardent leur propre licence. League of Legends est une marque de Riot Games, Inc.

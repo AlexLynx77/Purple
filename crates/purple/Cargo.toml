@@ -3,6 +3,7 @@ name = "purple"
 version = "0.2.0"
 edition = "2021"
 description = "Skin changer for League of Legends"
+license = "MIT"
 build = "build.rs"
 
 [lib]

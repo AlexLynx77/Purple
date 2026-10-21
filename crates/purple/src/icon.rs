@@ -132,7 +132,7 @@ mod tests {
     #[test]
     fn preview() {
         let Some(dir) = std::env::var_os("PURPLE_ICON_PREVIEW") else { return };
-        for size in [16u32, 32, 64, 256] {
+        for size in [16u32, 32, 64, 256, 512] {
             let path = std::path::Path::new(&dir).join(format!("icon-{size}.png"));
             image::save_buffer(path, &rgba(size), size, size, image::ColorType::Rgba8).unwrap();
         }
