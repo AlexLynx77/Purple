@@ -1,24 +1,61 @@
 //! The Purple logo, drawn in code so no image file ships with the program.
 //!
-//! A dark violet orb with two little pointed ears, after the orbs of Star Guardian Syndra: a
-//! shaded sphere, a pink rim light on its upper-left edge, a glossy highlight, and a small star.
+//! One of Star Guardian Syndra's orbs: a glowing violet sphere with a neon magenta rim, two
+//! pointed ears that flare outwards, and a small, slightly mischievous face (slanted eyes and a
+//! `w` mouth). Large sizes add specks of starlight inside the orb and a soft outer glow.
 //! `build.rs` includes this file to make the `.exe` icon, so it must not depend on anything.
 
 type Point = (f32, f32);
+type Rgb = [f32; 3];
 
-const CENTRE: Point = (0.5, 0.57);
-const RADIUS: f32 = 0.37;
-/// The ears, as triangles: their tips lean outwards.
+const CENTRE: Point = (0.5, 0.58);
+const RADIUS: f32 = 0.34;
+/// The ears, as triangles (outer base, tip, inner base): their bases are hidden in the orb.
 const EARS: [[Point; 3]; 2] = [
-    [(0.205, 0.40), (0.22, 0.135), (0.42, 0.27)],
-    [(0.795, 0.40), (0.78, 0.135), (0.58, 0.27)],
+    [(0.20, 0.47), (0.11, 0.16), (0.40, 0.31)],
+    [(0.80, 0.47), (0.89, 0.16), (0.60, 0.31)],
 ];
 /// Where the light comes from (upper left, a little towards the viewer).
-const LIGHT: [f32; 3] = [-0.55, -0.65, 0.52];
+const LIGHT: [f32; 3] = [-0.5, -0.65, 0.57];
 
-fn mix(a: [f32; 3], b: [f32; 3], t: f32) -> [f32; 3] {
+const DEEP: Rgb = [52.0, 6.0, 92.0];
+const BODY: Rgb = [142.0, 40.0, 208.0];
+const NEON: Rgb = [238.0, 92.0, 255.0];
+const FACE: Rgb = [255.0, 238.0, 253.0];
+const FACE_GLOW: Rgb = [255.0, 120.0, 240.0];
+const STARLIGHT: Rgb = [236.0, 205.0, 255.0];
+
+/// Specks of starlight inside the orb: centre and radius.
+const STARS: [(Point, f32); 8] = [
+    ((0.35, 0.39), 0.007),
+    ((0.57, 0.35), 0.005),
+    ((0.72, 0.47), 0.006),
+    ((0.27, 0.70), 0.005),
+    ((0.42, 0.85), 0.006),
+    ((0.63, 0.86), 0.005),
+    ((0.77, 0.69), 0.007),
+    ((0.49, 0.45), 0.004),
+];
+
+fn mix(a: Rgb, b: Rgb, t: f32) -> Rgb {
     let t = t.clamp(0.0, 1.0);
     [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]
+}
+
+fn smoothstep(e0: f32, e1: f32, x: f32) -> f32 {
+    let t = ((x - e0) / (e1 - e0)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+fn length(x: f32, y: f32) -> f32 {
+    (x * x + y * y).sqrt()
+}
+
+/// Distance from `p` to the segment `a`-`b`.
+fn segment(p: Point, a: Point, b: Point) -> f32 {
+    let (pa, ba) = ((p.0 - a.0, p.1 - a.1), (b.0 - a.0, b.1 - a.1));
+    let h = ((pa.0 * ba.0 + pa.1 * ba.1) / (ba.0 * ba.0 + ba.1 * ba.1)).clamp(0.0, 1.0);
+    length(pa.0 - ba.0 * h, pa.1 - ba.1 * h)
 }
 
 /// Whether `p` is inside the triangle `t` (either winding).
@@ -28,58 +65,91 @@ fn in_triangle(t: &[Point; 3], p: Point) -> bool {
     !((d1 < 0.0 || d2 < 0.0 || d3 < 0.0) && (d1 > 0.0 || d2 > 0.0 || d3 > 0.0))
 }
 
-/// A four-pointed star centred on `c`, of half-size `r`: its coverage at `p` (0 to 1).
-fn star(p: Point, c: Point, r: f32) -> f32 {
-    let (dx, dy) = ((p.0 - c.0).abs() / r, (p.1 - c.1).abs() / r);
-    (1.0 - (dx.sqrt() + dy.sqrt())).clamp(0.0, 1.0).powf(0.4)
+/// Signed distance to the face (eyes and mouth): negative inside.
+fn face(p: Point, with_mouth: bool) -> f32 {
+    // Eyes: almond shapes whose top edge slopes down towards the nose, for a mischievous look.
+    let mut d = f32::MAX;
+    for side in [-1.0f32, 1.0] {
+        let (cx, cy, rx, ry) = (0.5 + side * 0.118, 0.605, 0.072, 0.05);
+        let (x, y) = (p.0 - cx, p.1 - cy);
+        let ellipse = (length(x / rx, y / ry) - 1.0) * ry;
+        // The cut line: higher on the outer side, lower towards the middle.
+        let cut = (cy - 0.016 - x * side * 0.62) - p.1;
+        d = d.min(ellipse.max(cut));
+    }
+    if with_mouth {
+        // Mouth: a small `w`, two lower half-circles side by side.
+        let (r, y0) = (0.022, 0.7);
+        for cx in [0.5 - r, 0.5 + r] {
+            let arc = if p.1 >= y0 {
+                (length(p.0 - cx, p.1 - y0) - r).abs()
+            } else {
+                length((p.0 - cx).abs() - r, p.1 - y0)
+            };
+            d = d.min(arc - 0.008);
+        }
+    }
+    d
 }
 
-/// The colour (RGB) and coverage of the logo at `p` in the unit square.
-fn shade(p: Point, with_star: bool) -> Option<([f32; 3], f32)> {
-    const DEEP: [f32; 3] = [30.0, 8.0, 52.0];
-    const BODY: [f32; 3] = [88.0, 30.0, 128.0];
-    const RIM: [f32; 3] = [255.0, 170.0, 240.0];
-
+/// The colour (RGB) and coverage of the logo at `p` in the unit square. `detail` adds the
+/// mouth, the starlight and the outer glow, which are noise at tray sizes.
+fn shade(p: Point, detail: bool) -> Option<(Rgb, f32)> {
     let (dx, dy) = ((p.0 - CENTRE.0) / RADIUS, (p.1 - CENTRE.1) / RADIUS);
-    let d2 = dx * dx + dy * dy;
-    let color = if d2 <= 1.0 {
-        // Sphere: diffuse light, then a rim light where the surface turns away (upper left).
-        let nz = (1.0 - d2).sqrt();
+    let r = length(dx, dy);
+    let ear = EARS.iter().find(|ear| in_triangle(ear, p));
+
+    let body = if r <= 1.0 {
+        // Sphere: diffuse light, then the neon rim all around, brightest towards the light.
+        let nz = (1.0 - r * r).sqrt();
         let diffuse = (dx * LIGHT[0] + dy * LIGHT[1] + nz * LIGHT[2]).max(0.0);
-        let mut c = mix(DEEP, BODY, diffuse * 1.15);
-        let facing_light = ((-dx * 0.6 - dy * 0.8) / d2.sqrt().max(1e-3)).max(0.0);
-        let rim = (1.0 - nz).powf(0.9) * facing_light.powf(0.7);
-        c = mix(c, RIM, rim * 1.1);
-        // A soft violet bounce light on the lower right.
-        let bounce = (1.0 - nz).powf(3.0) * ((dx * 0.5 + dy * 0.85) / d2.sqrt().max(1e-3)).max(0.0);
-        c = mix(c, [150.0, 90.0, 230.0], bounce * 0.6);
-        // Glossy highlight: a small soft oval on the upper left.
-        let (hx, hy) = ((dx + 0.34) / 0.2, (dy + 0.46) / 0.12);
-        let gloss = (1.0 - (hx * hx + hy * hy)).clamp(0.0, 1.0);
-        mix(c, [255.0, 236.0, 255.0], gloss * 0.9)
-    } else if let Some(ear) = EARS.iter().find(|ear| in_triangle(ear, p)) {
-        // Ears: lit like the sphere's top, their outer edge catching the rim light.
+        let mut c = mix(DEEP, BODY, diffuse * 1.1);
+        let towards_light = ((-dx * 0.6 - dy * 0.8) / r.max(1e-3)).max(0.0);
+        let rim = smoothstep(0.78, 1.0, r) * (0.75 + 0.25 * towards_light);
+        c = mix(c, NEON, rim);
+        // A faint gloss on the upper left.
+        let gloss = (1.0 - length((dx + 0.36) / 0.24, (dy + 0.5) / 0.13)).clamp(0.0, 1.0);
+        c = mix(c, [255.0, 225.0, 255.0], gloss * 0.3);
+        if detail {
+            for &(s, sr) in &STARS {
+                let d = length(p.0 - s.0, p.1 - s.1) / sr;
+                c = mix(c, STARLIGHT, (1.0 - d).clamp(0.0, 1.0) * 0.85 + (1.0 - d / 3.0).clamp(0.0, 1.0) * 0.15);
+            }
+        }
+        Some(c)
+    } else if let Some(ear) = ear {
+        // Ears: darker towards the tip, with the same neon along their edges.
         let tip = ear[1];
         let along = ((p.1 - tip.1) / (ear[0].1 - tip.1)).clamp(0.0, 1.0);
-        let c = mix(BODY, DEEP, 0.35 + along * 0.5);
-        // The left ear faces the light: its outer edge glows like the sphere's rim.
-        let left = ear[0].0 < 0.5;
-        let edge = (p.0 - ear[0].0.min(tip.0)).abs();
-        let lit = if left { (1.0 - edge / 0.05).clamp(0.0, 1.0) } else { 0.0 };
-        mix(c, RIM, lit * 0.85 + (1.0 - along) * 0.15)
+        let c = mix(DEEP, BODY, 0.25 + along * 0.55);
+        let edge = segment(p, ear[0], tip).min(segment(p, tip, ear[2]));
+        Some(mix(c, NEON, 1.0 - smoothstep(0.0, 0.035, edge)))
     } else {
-        [0.0; 3]
+        None
     };
-    let inside = d2 <= 1.0 || EARS.iter().any(|ear| in_triangle(ear, p));
-    let sparkle = if with_star { star(p, (0.86, 0.16), 0.11) } else { 0.0 };
-    match (inside, sparkle > 0.0) {
-        (true, _) => Some((mix(color, [255.0, 240.0, 255.0], sparkle), 1.0)),
-        (false, true) => Some(([255.0, 214.0, 250.0], sparkle)),
-        (false, false) => None,
+
+    match body {
+        Some(c) => {
+            // The face glows: a bright core with a pink halo.
+            let d = face(p, detail);
+            let c = mix(c, FACE_GLOW, (1.0 - d.max(0.0) / 0.03).clamp(0.0, 1.0) * 0.55);
+            Some((mix(c, FACE, smoothstep(0.004, -0.004, d)), 1.0))
+        }
+        None if detail => {
+            // A soft neon glow around the orb and the ears.
+            let ear_edge = EARS
+                .iter()
+                .map(|e| segment(p, e[0], e[1]).min(segment(p, e[1], e[2])))
+                .fold(f32::MAX, f32::min);
+            let edge = ((r - 1.0) * RADIUS).min(ear_edge);
+            let glow = (1.0 - edge / 0.06).clamp(0.0, 1.0).powi(2) * 0.55;
+            (glow > 0.0).then_some((NEON, glow))
+        }
+        None => None,
     }
 }
 
-/// RGBA pixels of a `size` x `size` icon. The star is left out below 24 px, where it is noise.
+/// RGBA pixels of a `size` x `size` icon. Small details are left out below 48 px.
 pub fn rgba(size: u32) -> Vec<u8> {
     const SAMPLES: u32 = 4;
     let px = 1.0 / size as f32;
@@ -94,7 +164,7 @@ pub fn rgba(size: u32) -> Vec<u8> {
                         (x as f32 + (sx as f32 + 0.5) / SAMPLES as f32) * px,
                         (y as f32 + (sy as f32 + 0.5) / SAMPLES as f32) * px,
                     );
-                    if let Some((c, a)) = shade(p, size >= 24) {
+                    if let Some((c, a)) = shade(p, size >= 48) {
                         acc[0] += c[0] * a;
                         acc[1] += c[1] * a;
                         acc[2] += c[2] * a;
