@@ -105,6 +105,16 @@ impl Catalog {
     }
 }
 
+/// The champion's alias (`MonkeyKing` for Wukong), which names its game archive: from the cached
+/// catalog, else from the client when it is running.
+pub fn champion_alias(champion_id: u32, lcu: Option<&Lcu>) -> Option<String> {
+    let cached = Catalog::load_cached().and_then(|c| c.champion(&champion_id.to_string()).map(|c| c.alias.clone()));
+    cached.or_else(|| {
+        let champion = lcu?.get(&format!("/lol-game-data/assets/v1/champions/{champion_id}.json")).ok()??;
+        Some(champion.get("alias")?.as_str()?.to_owned())
+    })
+}
+
 fn parse_champion(v: &Value) -> Option<Champion> {
     let id = u32::try_from(v.get("id")?.as_i64()?).ok().filter(|id| *id > 0)?;
     Some(Champion {

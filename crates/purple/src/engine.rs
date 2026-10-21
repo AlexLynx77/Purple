@@ -4,7 +4,7 @@
 
 use crate::config::Config;
 use crate::lcu::Lcu;
-use crate::{overlay, patcher, store};
+use crate::{catalog, overlay, patcher, store};
 use anyhow::Result;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -49,8 +49,11 @@ fn local_champion(lcu: &Lcu) -> Result<u32> {
 /// Builds the overlay for `skin` and points the patcher at it. Returns the time it took.
 fn arm(lcu: &Lcu, champion: u32, skin: u32, host: &mut Option<patcher::Host>, host_exe: &Path) -> Result<f32> {
     let started = Instant::now();
-    let fantome = store::ensure_fantome(champion, skin)?;
-    let overlay = overlay::build(&fantome, skin, &lcu.install_dir().join("Game"))?;
+    let game_dir = lcu.install_dir().join("Game");
+    let alias = catalog::champion_alias(champion, Some(lcu));
+    let (fantome, source) = store::ensure_fantome(&game_dir, alias.as_deref(), champion, skin)?;
+    store::log(&format!("skin {skin}: {source:?} file {}", fantome.display()));
+    let overlay = overlay::build(&fantome, skin, &game_dir)?;
     if !host.as_mut().is_some_and(patcher::Host::is_alive) {
         *host = Some(patcher::Host::spawn(host_exe)?);
     }

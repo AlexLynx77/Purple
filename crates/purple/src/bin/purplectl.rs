@@ -1,7 +1,7 @@
 //! Command-line front end: inspect the client, choose skins, run the engine in a terminal.
 
 use anyhow::{bail, Context, Result};
-use purple::catalog::Catalog;
+use purple::catalog::{self, Catalog};
 use purple::config::Config;
 use purple::engine::{self, Event};
 use purple::lcu::{self, Lcu};
@@ -17,9 +17,9 @@ const USAGE: &str = "usage: purplectl <command>
   unset <champion>            stop applying a skin for <champion>
   list                        show the configured skins
   run                         wait for champion select and apply the configured skin
-  build <champ id> <skin id>  fetch a skin and build its overlay (no client needed; for testing)
+  build <champ id> <skin id>  make a skin file and build its overlay (no client needed; for testing)
 
-Set PURPLE_DEBUG=1 for the patcher's full logs.";
+Set PURPLE_DEBUG=1 for the patcher's full logs, PURPLE_SKIN_SOURCE=leagueskins to prefer LeagueSkins' skin files.";
 
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -113,8 +113,11 @@ fn list() -> Result<()> {
 
 fn build(champion: u32, skin: u32) -> Result<()> {
     let started = Instant::now();
-    let fantome = store::ensure_fantome(champion, skin)?;
-    let overlay = overlay::build(&fantome, skin, &lcu::game_dir()?)?;
+    let game_dir = lcu::game_dir()?;
+    let alias = catalog::champion_alias(champion, Lcu::connect().ok().as_ref());
+    let (fantome, source) = store::ensure_fantome(&game_dir, alias.as_deref(), champion, skin)?;
+    println!("skin file ({source:?}): {}", fantome.display());
+    let overlay = overlay::build(&fantome, skin, &game_dir)?;
     println!("overlay ready in {:.1}s: {}", started.elapsed().as_secs_f32(), overlay.display());
     Ok(())
 }
