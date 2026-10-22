@@ -9,7 +9,7 @@ use crate::icon;
 use crate::images::Images;
 use crate::lcu::Lcu;
 use crate::status::Status;
-use crate::win;
+use crate::{update, win};
 use egui::{
     Align2, Color32, CornerRadius, CursorIcon, FontFamily, FontId, Margin, Pos2, Rect, Sense, Stroke, StrokeKind,
     TextureHandle, Vec2,
@@ -56,6 +56,9 @@ fn regular(size: f32) -> FontId {
     FontId::proportional(size)
 }
 
+/// A notice to show: message, colour of its edge, and its button (label, enabled) if any.
+type Notice = (String, Color32, Option<(&'static str, bool)>);
+
 /// Which champions the list shows.
 #[derive(PartialEq, Eq, Clone, Copy)]
 enum Filter {
@@ -82,6 +85,8 @@ struct App {
     /// Scroll the list and the grid to the current selection.
     reveal: bool,
     chroma_picker: Option<ChromaPicker>,
+    /// When the update button was last clicked.
+    update_requested: Option<Instant>,
 }
 
 pub fn run() -> eframe::Result {
@@ -187,6 +192,7 @@ impl App {
             screenshot,
             reveal: true,
             chroma_picker: None,
+            update_requested: None,
         };
         app.refresh_catalog();
         app
@@ -421,7 +427,10 @@ impl App {
         });
     }
 
-    fn notice(ui: &mut egui::Ui, text: &str, tint: Color32) {
+    /// A message with a coloured edge, and an optional button on the right (label, enabled).
+    /// Returns whether the button was clicked.
+    fn notice(ui: &mut egui::Ui, text: &str, tint: Color32, button: Option<(&str, bool)>) -> bool {
+        let mut clicked = false;
         let response = egui::Frame::new()
             .fill(color::RAISED)
             .stroke(Stroke::new(1.0, color::BORDER))
@@ -429,28 +438,84 @@ impl App {
             .inner_margin(Margin { left: 16, right: 12, top: 9, bottom: 9 })
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
-                ui.label(egui::RichText::new(text).color(color::TEXT).size(13.0));
+                let label = egui::Label::new(egui::RichText::new(text).color(color::TEXT).size(13.0)).wrap();
+                match button {
+                    Some((caption, enabled)) => {
+                        // A row as tall as its content, the button on its right.
+                        ui.horizontal(|ui| {
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                clicked = ui.add_enabled(enabled, egui::Button::new(caption)).clicked();
+                                ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| ui.add(label));
+                            });
+                        });
+                    }
+                    None => {
+                        ui.add(label);
+                    }
+                }
             })
             .response;
         let bar = Rect::from_min_size(response.rect.min + Vec2::new(1.0, 1.0), Vec2::new(3.0, response.rect.height() - 2.0));
         ui.painter().rect_filled(bar, CornerRadius { nw: RADIUS, sw: RADIUS, ne: 0, se: 0 }, tint);
+        clicked
+    }
+
+    /// The update banner, when a newer Purple is released.
+    fn update_notice(&self) -> Option<Notice> {
+        if !self.engine_running {
+            return None;
+        }
+        let version = self.status.update_available.as_deref()?;
+        let in_game = self.status.in_game;
+        if self.status.updating {
+            let text = if in_game {
+                format!("Purple {version} is installed. Purple restarts once the game is over.")
+            } else {
+                format!("Installing Purple {version}. Purple restarts by itself.")
+            };
+            return Some((text, color::TEXT_DIM, None));
+        }
+        // The click is on its way to the resident program: do not send it twice.
+        let waiting = self.update_requested.is_some_and(|t| t.elapsed() < Duration::from_secs(5));
+        let enabled = !in_game && !waiting;
+        Some(match &self.status.update_error {
+            Some(error) => (format!("Could not update Purple to {version}: {error}"), color::WARNING, Some(("Retry", enabled))),
+            None if in_game => (format!("Purple {version} is available. You can update once the game is over."), color::TEXT_DIM, Some(("Update", false))),
+            None => (format!("Purple {version} is available."), color::TEXT_DIM, Some(("Update", enabled))),
+        })
+    }
+
+    /// The update banner and the current problem, above the content.
+    fn notices(&mut self, ui: &mut egui::Ui) {
+        if let Some((text, tint, button)) = self.update_notice() {
+            if Self::notice(ui, &text, tint, button) {
+                self.update_requested = Some(Instant::now());
+                if !win::signal(update::REQUEST_EVENT) {
+                    self.error = Some("Purple is not running: start it to update.".into());
+                }
+            }
+            ui.add_space(14.0);
+        }
+        if let Some((text, tint)) = self.problem() {
+            Self::notice(ui, &text, tint, None);
+            ui.add_space(14.0);
+        }
     }
 
     fn content(&mut self, ui: &mut egui::Ui) {
         if self.catalog.champions.is_empty() {
+            self.notices(ui);
             empty_state(ui, "Loading champions", "Purple reads them from your League of Legends installation.");
             return;
         }
         let Some(champion_id) = self.selected else {
+            self.notices(ui);
             empty_state(ui, "No champion selected", "Pick one on the left to see its skins.");
             return;
         };
         self.header(ui, champion_id);
         ui.add_space(14.0);
-        if let Some((text, tint)) = self.problem() {
-            Self::notice(ui, &text, tint);
-            ui.add_space(14.0);
-        }
+        self.notices(ui);
 
         let chosen = self.config.skins.get(&champion_id).copied();
         let base = self.catalog.skins_of(champion_id).find(|s| s.is_base).cloned();
@@ -483,6 +548,8 @@ impl App {
             grid = grid.vertical_scroll_offset(centred.max(0.0));
         }
         grid.show(ui, |ui| {
+            // Room for the cards' border, drawn outside the picture, so the grid does not clip the top row's.
+            ui.add_space(3.0);
             for row in cards.chunks(columns) {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = CARD_GAP;

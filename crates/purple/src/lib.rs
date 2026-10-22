@@ -15,4 +15,5 @@ pub mod patcher_install;
 pub mod skingen;
 pub mod status;
 pub mod store;
+pub mod update;
 pub mod win;

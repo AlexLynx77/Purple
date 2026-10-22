@@ -28,6 +28,14 @@ pub struct Status {
     pub patcher_outdated: bool,
     pub overlay_unreadable: bool,
     pub error: Option<String>,
+    /// Version of a newer Purple release, when there is one.
+    #[serde(default)]
+    pub update_available: Option<String>,
+    /// True while the update is downloaded and installed.
+    #[serde(default)]
+    pub updating: bool,
+    #[serde(default)]
+    pub update_error: Option<String>,
 }
 
 impl Status {
@@ -66,6 +74,15 @@ impl Status {
             Event::OverlayUnreadable(_) => self.overlay_unreadable = true,
             Event::Error(message) => self.error = Some(message.clone()),
             Event::Game { .. } => {}
+            Event::UpdateAvailable(version) => self.update_available = Some(version.clone()),
+            Event::Updating => {
+                self.updating = true;
+                self.update_error = None;
+            }
+            Event::UpdateFailed(message) => {
+                self.updating = false;
+                self.update_error = Some(message.clone());
+            }
         }
         *self != before
     }

@@ -24,7 +24,7 @@ fn root() -> Result<PathBuf> {
     Ok(store::overlay_base_dir()?.join("patcher"))
 }
 
-fn agent() -> Result<ureq::Agent> {
+pub(crate) fn agent() -> Result<ureq::Agent> {
     Ok(ureq::AgentBuilder::new()
         .tls_connector(Arc::new(native_tls::TlsConnector::new()?))
         .timeout_connect(Duration::from_secs(10))

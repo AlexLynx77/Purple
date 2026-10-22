@@ -9,10 +9,12 @@
 
 use purple::engine::{self, Event};
 use purple::status::Status;
-use purple::{cli, icon, store, win};
+use purple::{cli, icon, store, update, win};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::{Duration, Instant};
 use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
 use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 
@@ -27,7 +29,7 @@ fn main() {
                 std::process::exit(1);
             }
         }
-        first => resident(first != Some(win::BACKGROUND_ARG)),
+        first => resident(first),
     }
 }
 
@@ -44,9 +46,19 @@ fn window() {
 }
 
 /// The resident program: engine + notification-area icon, plus the window unless `--background`.
-fn resident(open_window: bool) {
-    let instance = win::single_instance(win::DAEMON_MUTEX);
-    if open_window {
+fn resident(arg: Option<&str>) {
+    let updated = arg == Some(update::UPDATED_ARG);
+    let instance = if updated {
+        // The previous Purple is still exiting: wait for it to let go.
+        wait_for(|| win::single_instance(win::DAEMON_MUTEX))
+    } else {
+        win::single_instance(win::DAEMON_MUTEX)
+    };
+    if arg != Some(win::BACKGROUND_ARG) {
+        if updated {
+            // Otherwise the old window, still closing, would be brought forward instead.
+            wait_for(|| (!win::is_running(win::UI_MUTEX)).then_some(()));
+        }
         // Already running or not, a launch shows the window.
         if let Err(e) = win::spawn_ui() {
             store::log(&format!("could not open the window: {e:#}"));
@@ -54,8 +66,36 @@ fn resident(open_window: bool) {
     }
     let Some(_instance) = instance else { return };
     store::trim_log();
-    if let Err(e) = run() {
-        store::log(&format!("fatal: {e:#}"));
+    update::remove_leftovers();
+    if updated {
+        // The previous Purple's deletion helper is still finishing: clean up after it.
+        thread::spawn(|| {
+            thread::sleep(Duration::from_secs(30));
+            update::remove_leftovers();
+        });
+    }
+    match run() {
+        Ok(Some(exe)) => {
+            if let Err(e) = win::spawn_program(&exe, update::UPDATED_ARG) {
+                store::log(&format!("could not start the updated Purple: {e:#}"));
+            }
+        }
+        Ok(None) => {}
+        Err(e) => store::log(&format!("fatal: {e:#}")),
+    }
+}
+
+/// Retries `attempt` for up to 30 seconds.
+fn wait_for<T>(mut attempt: impl FnMut() -> Option<T>) -> Option<T> {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        if let Some(value) = attempt() {
+            return Some(value);
+        }
+        if Instant::now() >= deadline {
+            return None;
+        }
+        thread::sleep(Duration::from_millis(200));
     }
 }
 
@@ -84,7 +124,66 @@ fn log_event(event: &Event) {
     }
 }
 
-fn run() -> anyhow::Result<()> {
+/// Folds `event` into the status shared with the window and wakes the tray when it changed.
+fn publish(status: &Mutex<Status>, main_thread: u32, event: &Event) {
+    log_event(event);
+    let Ok(mut current) = status.lock() else { return };
+    if current.apply(event) {
+        if let Err(e) = current.write() {
+            store::log(&format!("could not write the status: {e:#}"));
+        }
+        win::post(main_thread, win::MSG_WAKE);
+    }
+}
+
+const UPDATE_CHECK_EVERY: Duration = Duration::from_secs(24 * 60 * 60);
+
+/// Looks for a newer Purple at start and then daily, and installs it when the window asks for it.
+/// Once installed, `restart` holds the program to start and the tray is woken to quit.
+fn updater(status: &Mutex<Status>, main_thread: u32, restart: &Mutex<Option<PathBuf>>) {
+    let request = match win::NamedEvent::create(update::REQUEST_EVENT) {
+        Ok(request) => request,
+        Err(e) => return store::log(&format!("updates disabled: {e:#}")),
+    };
+    let mut latest: Option<update::Release> = None;
+    let mut next_check = Instant::now();
+    loop {
+        if Instant::now() >= next_check {
+            next_check = Instant::now() + UPDATE_CHECK_EVERY;
+            match update::check() {
+                Ok(Some(release)) => {
+                    publish(status, main_thread, &Event::UpdateAvailable(release.version.clone()));
+                    latest = Some(release);
+                }
+                Ok(None) => {}
+                Err(e) => store::log(&format!("could not check for a Purple update: {e:#}")),
+            }
+        }
+        if !request.wait(next_check.saturating_duration_since(Instant::now())) {
+            continue;
+        }
+        let Some(release) = &latest else { continue };
+        // Restarting would pull the patcher out from under a running game.
+        if status.lock().is_ok_and(|s| s.in_game) {
+            publish(status, main_thread, &Event::UpdateFailed("Purple can update once the game is over.".into()));
+            continue;
+        }
+        publish(status, main_thread, &Event::Updating);
+        match update::install(release) {
+            Ok(exe) => {
+                if let Ok(mut restart) = restart.lock() {
+                    *restart = Some(exe);
+                }
+                win::post(main_thread, win::MSG_WAKE);
+                return;
+            }
+            Err(e) => publish(status, main_thread, &Event::UpdateFailed(format!("{e:#}"))),
+        }
+    }
+}
+
+/// Runs the resident program until it quits. Returns the program to start next after an update.
+fn run() -> anyhow::Result<Option<PathBuf>> {
     let status = Arc::new(Mutex::new(Status::default()));
     // Forget whatever a previous run left behind.
     status.lock().expect("status lock").write()?;
@@ -92,6 +191,7 @@ fn run() -> anyhow::Result<()> {
     let main_thread = win::current_thread_id();
     let stop = Arc::new(AtomicBool::new(false));
     let quit_after_game = Arc::new(AtomicBool::new(false));
+    let restart: Arc<Mutex<Option<PathBuf>>> = Arc::default();
 
     let state_item = MenuItem::new("League client not running", false, None);
     let open_item = MenuItem::new("Open Purple", true, None);
@@ -135,21 +235,17 @@ fn run() -> anyhow::Result<()> {
     let engine_thread = {
         let (status, stop) = (status.clone(), stop.clone());
         thread::spawn(move || {
-            let mut emit = |event: Event| {
-                log_event(&event);
-                let Ok(mut current) = status.lock() else { return };
-                if current.apply(&event) {
-                    if let Err(e) = current.write() {
-                        store::log(&format!("could not write the status: {e:#}"));
-                    }
-                    win::post(main_thread, win::MSG_WAKE);
-                }
-            };
+            let mut emit = |event: Event| publish(&status, main_thread, &event);
             if let Err(e) = engine::run(&stop, &mut emit) {
                 emit(Event::Error(format!("{e:#}")));
             }
         })
     };
+
+    {
+        let (status, restart) = (status.clone(), restart.clone());
+        thread::spawn(move || updater(&status, main_thread, &restart));
+    }
 
     win::message_loop(|| {
         let current = status.lock().map(|s| s.clone()).unwrap_or_default();
@@ -160,6 +256,10 @@ fn run() -> anyhow::Result<()> {
             quit_item.set_text("Quit (after the game)");
             return !current.in_game;
         }
+        // An installed update restarts Purple, after the game if one has started meanwhile.
+        if restart.lock().is_ok_and(|r| r.is_some()) {
+            return !current.in_game;
+        }
         false
     });
 
@@ -168,5 +268,10 @@ fn run() -> anyhow::Result<()> {
     stop.store(true, Ordering::Relaxed);
     let _ = engine_thread.join();
     let _ = Status::default().write();
-    Ok(())
+    let restart = restart.lock().ok().and_then(|mut r| r.take());
+    if restart.is_some() {
+        // self-replace deletes the old program once this process exits: the window must have let go of it.
+        wait_for(|| (!win::is_running(win::UI_MUTEX)).then_some(()));
+    }
+    Ok(restart)
 }

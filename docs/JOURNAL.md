@@ -1,157 +1,157 @@
-> **Journal historique de mise au point.** Ce fichier garde la trace de la recherche et des diagnostics, dans l'ordre. Certains passages sont obsolètes (les « spikes » ont été supprimés, les chemins `C:\tmp\lol` n'existent plus, `mod-tools.exe` n'est plus utilisé). L'état à jour du projet est dans le [README](../README.md).
+> **Historical development journal.** This file records the research and diagnostics, in order. Some passages are outdated (the "spikes" have been removed, the `C:\tmp\lol` paths no longer exist, `mod-tools.exe` is no longer used). The current state of the project is in the [README](../README.md).
 
-# Purple — notes de recherche
+# Purple — research notes
 
-Objectif : un skin changer LoL perso, sans dépendre d'une app tierce qui peut s'arrêter.
-Références étudiées : Rose (Alban1911/Rose), LTK Manager + league-mod (LeagueToolkit).
+Goal: a personal LoL skin changer that does not depend on a third-party app that may stop.
+References studied: Rose (Alban1911/Rose), LTK Manager + league-mod (LeagueToolkit).
 
-## Comment ça marche (3 couches)
+## How it works (3 layers)
 
-1. **Fichiers de skin** — un skin = un petit `.fantome` (zip) contenant `WAD/<Champion>.wad.client`.
-   Ex. `LeagueSkins/skins/1/1001/1001.fantome` (Goth Annie) = 5 Ko : un `skin0.bin` (format PROP)
-   qui *redirige* vers `DATA/Characters/Annie/Skins/Skin1.bin`, + un bin pour les sous-personnages
-   (Tibbers). Les vrais assets (modèles, textures) sont déjà dans l'install du jeu.
-   → on peut les **générer nous-mêmes** plus tard ; en attendant on utilise LeagueSkins.
-2. **Overlay** — copie des WAD du jeu avec les chunks du mod. Construit par `mod-tools.exe mkoverlay`
-   (cslol, spike) ou par la crate Rust `ltk_overlay` (cible finale). ~2 s pour un skin.
-3. **LTK Patcher** — `ltk_patcher_host.exe` + `ltk_patcher_dll.dll` (binaires fermés, maintenus par
-   LeagueToolkit, licence permissive : réutilisable/redistribuable, re-signer si redistribué hors
-   release officielle). Le host injecte la DLL dans le jeu au lancement ; la DLL fait lire au jeu
-   l'overlay à la place des WAD officiels (et contourne la vérification de signature).
+1. **Skin files** — a skin = a small `.fantome` (zip) holding `WAD/<Champion>.wad.client`.
+   E.g. `LeagueSkins/skins/1/1001/1001.fantome` (Goth Annie) = 5 KB: a `skin0.bin` (PROP format)
+   that *redirects* to `DATA/Characters/Annie/Skins/Skin1.bin`, + a bin for the sub-characters
+   (Tibbers). The real assets (models, textures) are already in the game install.
+   → we can **generate them ourselves** later; meanwhile we use LeagueSkins.
+2. **Overlay** — copy of the game's WADs with the mod's chunks. Built by `mod-tools.exe mkoverlay`
+   (cslol, spike) or by the Rust crate `ltk_overlay` (final target). ~2 s for one skin.
+3. **LTK Patcher** — `ltk_patcher_host.exe` + `ltk_patcher_dll.dll` (closed binaries, maintained by
+   LeagueToolkit, permissive license: reusable/redistributable, re-sign if redistributed outside the
+   official release). The host injects the DLL into the game at launch; the DLL makes the game read
+   the overlay instead of the official WADs (and bypasses the signature check).
 
-## Protocole du host (stdin/stdout, texte)
+## Host protocol (stdin/stdout, text)
 
 ```
 config loglevel 16
-config flags 4            # 4 = OPT_OUT_AH_V1 : désactive le scan anti-skinhack (obligatoire pour nous)
-config prefix <overlay>\  # dossier overlay, avec antislash final
-start scan                # puis lancer le jeu APRÈS (la DLL ne patche que les jeux lancés après)
+config flags 4            # 4 = OPT_OUT_AH_V1: disables the anti-skinhack scan (required for us)
+config prefix <overlay>\  # overlay folder, with a trailing backslash
+start scan                # then launch the game AFTERWARDS (the DLL only patches games started later)
 stop
 ```
-Events : `status <ts> injecting|injected|waiting|exited|failed ...`, `error ...`, `dll <ts> <pid> <tid> <level> <msg>`.
-Vérifié en local : le host répond `ok` aux 3 config puis `status ... injecting scanning for game`.
+Events: `status <ts> injecting|injected|waiting|exited|failed ...`, `error ...`, `dll <ts> <pid> <tid> <level> <msg>`.
+Checked locally: the host answers `ok` to the 3 configs, then `status ... injecting scanning for game`.
 
-## Risques / dépendances
+## Risks / dependencies
 
-- La DLL a une **date de fin de vie** (`end of life reached, please update`) : elle refuse les builds
-  du jeu trop récents → il faut récupérer les nouveaux binaires LTK à chaque patch. Prévoir une
-  mise à jour auto depuis les releases de LTK Manager + patcher derrière une interface remplaçable.
-- Le scan anti-skinhack de la DLL bloque les skins portés sur le champion de base (`c0000229`)
-  → flag 4 (comme Rose).
-- Rose suspend le processus du jeu pendant la construction de l'overlay ; non nécessaire si l'overlay
-  est prêt avant le lancement du jeu.
-- Télémétrie possible dans les binaires LTK : non vérifié.
+- The DLL has an **end-of-life date** (`end of life reached, please update`): it refuses game builds
+  that are too recent → new LTK binaries are needed after each patch. Plan an automatic update from
+  the LTK Manager releases + patcher behind a replaceable interface.
+- The DLL's anti-skinhack scan blocks skins applied on the base champion (`c0000229`)
+  → flag 4 (like Rose).
+- Rose suspends the game process while building the overlay; not needed if the overlay is ready
+  before the game starts.
+- Possible telemetry in the LTK binaries: not checked.
 
-## Environnement de dev (cette machine)
+## Development environment (this machine)
 
-- WSL ne démarre pas (WSL1 non supporté) — non nécessaire, Rust est installé sous Windows.
-- Rust MSVC installé mais **pas de Build Tools C++** (VS Code seulement) → pas de linker.
-  Solution retenue (2026-10-03) : **w64devkit 2.10.0** (gcc 16.2) dans `C:\Users\pierr\tools\w64devkit`
-  + toolchain Rust `stable-x86_64-pc-windows-gnu`, épinglée par `rust-toolchain.toml`, chemins dans
-  `.cargo/config.toml`. Rien dans le PATH système. Deux rustines : un `lib/libgcc_eh.a` vide ajouté dans
-  w64devkit (Rust le réclame, w64devkit n'en a pas) et `-C dlltool=` dans `.cargo/config.toml`.
-  Testé : la crate `zstd` (code C) compile. Si le dossier w64devkit est supprimé : refaire les rustines.
-- Le stub `cslol-dll.dll` du spike a été lié à la main avec `rust-lld` (no_std, aucun import).
+- WSL does not start (WSL1 not supported) — not needed, Rust is installed on Windows.
+- Rust MSVC installed but **no C++ Build Tools** (VS Code only) → no linker.
+  Chosen solution (2026-10-03): **w64devkit 2.10.0** (gcc 16.2) in `C:\Users\pierr\tools\w64devkit`
+  + Rust toolchain `stable-x86_64-pc-windows-gnu`, pinned by `rust-toolchain.toml`, paths in
+  `.cargo/config.toml`. Nothing in the system PATH. Two patches: an empty `lib/libgcc_eh.a` added to
+  w64devkit (Rust asks for it, w64devkit has none) and `-C dlltool=` in `.cargo/config.toml`.
+  Tested: the `zstd` crate (C code) compiles. If the w64devkit folder is deleted: redo the patches.
+- The spike's `cslol-dll.dll` stub was linked by hand with `rust-lld` (no_std, no imports).
 
-## Choix techniques
+## Technical choices
 
-- Langage : **Rust** (crates `ltk_*` natives, binaire minuscule, RAM minimale).
-- UI : native légère (egui ou Slint) plutôt que Tauri/WebView2 pour la RAM.
-- Pipeline cible : LCU websocket (champ select) → UI choix de skin → `ltk_overlay` → host patcher.
+- Language: **Rust** (native `ltk_*` crates, tiny binary, minimal RAM).
+- UI: light native (egui or Slint) rather than Tauri/WebView2, for RAM.
+- Target pipeline: LCU websocket (champ select) → skin choice UI → `ltk_overlay` → patcher host.
 
 ## Spikes (`spikes/`)
 
-- `setup.sh` : copie `mod-tools.exe`, `ltk_patcher_host.exe`, `ltk_patcher_dll.dll` dans `spikes/tools/`
-  (sources : clones locaux de Rose et ltk-manager dans `C:\tmp\lol`). Gitignorés.
-- `spike1.py <fichier.fantome>` : unpack → mkoverlay → host → attend le lancement d'un jeu.
-- `cslol_stub/` : DLL vide `cslol-dll.dll` requise par `mod-tools.exe` pour démarrer.
+- `setup.sh`: copies `mod-tools.exe`, `ltk_patcher_host.exe`, `ltk_patcher_dll.dll` into `spikes/tools/`
+  (sources: local clones of Rose and ltk-manager in `C:\tmp\lol`). Git-ignored.
+- `spike1.py <file.fantome>`: unpack → mkoverlay → host → waits for a game to start.
+- `cslol_stub/`: empty `cslol-dll.dll` that `mod-tools.exe` needs to start.
 
-## Résultat spike 1 (2026-10-03) — échec partiel, instructif
+## Spike 1 result (2026-10-03) — partial failure, instructive
 
-- Injection OK : host → `game found` → `dll attached` → `overlay verified 1 wad(s)` → `redirected wad: Annie.wad.client`.
-- Puis le jeu meurt ~1 s après : `FATAL ERROR - Installation is corrupt. WadFile mount failed.
-  DATA/FINAL/Champions/Annie.wad.client — Problem: Corrupt`, et il écrit `SOFT_REPAIR` (le client
-  lance alors sa réparation officielle, d'où la popup « problème avec votre installation »).
-  Les fichiers du jeu ne sont pas touchés (l'overlay est dans un dossier séparé).
-- Cause probable (NON confirmée) : `mod-tools.exe mkoverlay` (cslol, ancien) réécrit le WAD sans
-  gérer correctement les chunks WAD v3.4 « zstd + sous-chunks » (type 4) : les index de sous-chunks
-  de l'overlay diffèrent de l'original pour 1562 chunks sur 4083. Le jeu actuel rejette le résultat.
-- À tester : construire l'overlay avec la crate moderne `ltk_overlay` (ce que fait LTK Manager)
-  → nécessite un compilateur (MSVC Build Tools ou MinGW) ; ou tester LTK Manager en oracle.
-- Le scan anti-skinhack échoue bien comme prévu (`c0000229`, « opted out » grâce au flag 4) : OK.
+- Injection OK: host → `game found` → `dll attached` → `overlay verified 1 wad(s)` → `redirected wad: Annie.wad.client`.
+- Then the game dies ~1 s later: `FATAL ERROR - Installation is corrupt. WadFile mount failed.
+  DATA/FINAL/Champions/Annie.wad.client — Problem: Corrupt`, and it writes `SOFT_REPAIR` (the client
+  then starts its official repair, hence the "problem with your installation" popup).
+  The game files are not touched (the overlay is in a separate folder).
+- Likely cause (NOT confirmed): `mod-tools.exe mkoverlay` (cslol, old) rewrites the WAD without
+  handling WAD v3.4 "zstd + sub-chunks" chunks (type 4) correctly: the overlay's sub-chunk indices
+  differ from the original for 1562 chunks out of 4083. The current game rejects the result.
+- To test: build the overlay with the modern `ltk_overlay` crate (what LTK Manager does)
+  → needs a compiler (MSVC Build Tools or MinGW); or use LTK Manager as an oracle.
+- The anti-skinhack scan fails as expected (`c0000229`, "opted out" thanks to flag 4): OK.
 
-## Résultat spike 2 (2026-10-03) — SUCCÈS
+## Spike 2 result (2026-10-03) — SUCCESS
 
-- `spikes/overlay` (Rust, crate `ltk_overlay` 0.16.2 + `FantomeContent`) construit l'overlay en ~0,6 s.
-  Seuls 2 chunks diffèrent de l'original (contre 1562 avec mod-tools.exe) : la cause du crash du spike 1
-  était bien le réécriture du WAD par l'ancien cslol.
-- Test en jeu : Goth Annie affichée sur le skin de base (Outil d'entraînement). Pipeline validé :
-  `.fantome` LeagueSkins → `ltk_overlay` → `ltk_patcher_host` (flags=4) → jeu.
-- `mod-tools.exe` et le stub `cslol-dll.dll` ne sont plus nécessaires (spike 1 obsolète).
-- `spikes/host.py <overlay_dir>` lance seulement le host sur un overlay déjà construit.
+- `spikes/overlay` (Rust, crate `ltk_overlay` 0.16.2 + `FantomeContent`) builds the overlay in ~0.6 s.
+  Only 2 chunks differ from the original (against 1562 with mod-tools.exe): the cause of spike 1's crash
+  was indeed the WAD rewrite by the old cslol.
+- In-game test: Goth Annie shown on the base skin (Practice Tool). Pipeline validated:
+  LeagueSkins `.fantome` → `ltk_overlay` → `ltk_patcher_host` (flags=4) → game.
+- `mod-tools.exe` and the `cslol-dll.dll` stub are no longer needed (spike 1 obsolete).
+- `spikes/host.py <overlay_dir>` only starts the host on an overlay already built.
 
-## Prochaines étapes
-1. Binaire `purple` (Rust) : LCU (lockfile + websocket) → détecte champ select / champion / skin voulu.
-2. Télécharger/mettre en cache les `.fantome` LeagueSkins (index par champion/skin, chromas).
-3. Piloter le host depuis Rust (spawn, protocole texte, events), démarrer le scan avant le lancement du jeu.
-4. UI native légère (egui/Slint) + tray ; mise à jour auto du couple patcher host+DLL (date de fin de vie).
-5. Plus tard : générer les skins localement au lieu de dépendre de LeagueSkins.
+## Next steps
+1. `purple` binary (Rust): LCU (lockfile + websocket) → detects champ select / champion / wanted skin.
+2. Download/cache the LeagueSkins `.fantome` files (index by champion/skin, chromas).
+3. Drive the host from Rust (spawn, text protocol, events), start the scan before the game starts.
+4. Light native UI (egui/Slint) + tray; automatic update of the patcher host+DLL pair (end-of-life date).
+5. Later: generate the skins locally instead of depending on LeagueSkins.
 
-## Binaire `purple` (crates/purple) — état au 2026-10-03
+## `purple` binary (crates/purple) — state on 2026-10-03
 
-Commandes : `status`, `skins <champion>`, `set <champion> <skin>`, `unset`, `list`, `run`, `build <champ id> <skin id>`.
-`run` : poll du client (gameflow-phase + champ select), au champion choisi → télécharge le .fantome
-(LeagueSkins, cache `%LOCALAPPDATA%\Purple\skins`) → `ltk_overlay` → host patcher (`start scan`) ; ne coupe
-jamais le patcher tant qu'un jeu est attaché. Env : `PURPLE_DEBUG=1` (logs complets), `PURPLE_DATA_DIR`,
-`PURPLE_PATCHER_DIR`. Binaires du patcher : `vendor/ltk-patcher/` (licence incluse).
+Commands: `status`, `skins <champion>`, `set <champion> <skin>`, `unset`, `list`, `run`, `build <champ id> <skin id>`.
+`run`: polls the client (gameflow-phase + champ select); when the champion is picked → downloads the .fantome
+(LeagueSkins, cache `%LOCALAPPDATA%\Purple\skins`) → `ltk_overlay` → patcher host (`start scan`); never stops
+the patcher while a game is attached. Env: `PURPLE_DEBUG=1` (full logs), `PURPLE_DATA_DIR`,
+`PURPLE_PATCHER_DIR`. Patcher binaries: `vendor/ltk-patcher/` (license included).
 
-### Bug résolu : « overlay verified 0 wad(s) » (aucun skin visible) — CONFIRMÉ en jeu
-- Symptôme : injection OK, mais le DLL ne voit aucun WAD dans l'overlay → skin par défaut.
-- Cause : l'overlay était sous `%LOCALAPPDATA%`, donc sous `C:\Users\<nom>`, dont l'ACL n'autorise que le
-  compte, SYSTEM et les admins. Le jeu ne peut pas traverser ce dossier. Donner la lecture au seul dossier
-  final (essai `icacls` sur `overlay\`) ne change RIEN : diagnostic incomplet, réfuté en jeu.
-  Même overlay, octet pour octet, dans `C:\tmp\pd` ou `C:\ProgramData\Purple` → ça marche.
-- Correctif : les overlays vivent dans `%PROGRAMDATA%\Purple` (lisible par le groupe Utilisateurs, hérité par
-  les fichiers). Cache des skins et config restent dans `%LOCALAPPDATA%\Purple` (le jeu ne les lit pas).
-- Validé en jeu le 2026-10-03 : Annie gothique (1001) et Aatrox primordien (266033), via `purple run`,
-  chemins par défaut. Logs : `AH wad scan failed c0000229 ... (opted out)` → `overlay verified 1 wad(s)` →
+### Fixed bug: "overlay verified 0 wad(s)" (no skin visible) — CONFIRMED in game
+- Symptom: injection OK, but the DLL sees no WAD in the overlay → default skin.
+- Cause: the overlay was under `%LOCALAPPDATA%`, so under `C:\Users\<name>`, whose ACL only allows the
+  account, SYSTEM and administrators. The game cannot traverse that folder. Granting read access to the
+  final folder only (`icacls` test on `overlay\`) changes NOTHING: incomplete diagnosis, refuted in game.
+  Same overlay, byte for byte, in `C:\tmp\pd` or `C:\ProgramData\Purple` → it works.
+- Fix: overlays live in `%PROGRAMDATA%\Purple` (readable by the Users group, inherited by the files).
+  Skin cache and config stay in `%LOCALAPPDATA%\Purple` (the game does not read them).
+- Validated in game on 2026-10-03: Goth Annie (1001) and Primordian Aatrox (266033), via `purple run`,
+  default paths. Logs: `AH wad scan failed c0000229 ... (opted out)` → `overlay verified 1 wad(s)` →
   `redirected wad: .../<Champion>.wad.client`.
-- `run` affiche une alerte explicite si le DLL répète `overlay verified 0 wad(s)`.
-- Mesure : `purple` ~15 Mo de RAM + `ltk_patcher_host` ~8 Mo ; binaire release 3,3 Mo.
+- `run` shows an explicit warning if the DLL keeps reporting `overlay verified 0 wad(s)`.
+- Measured: `purple` ~15 MB of RAM + `ltk_patcher_host` ~8 MB; release binary 3.3 MB.
 
-## Fenêtre (`purple.exe`) — 2026-10-03
+## Window (`purple.exe`) — 2026-10-03
 
-- Structure : lib `purple` (catalog, config, engine, gui, images, lcu, overlay, patcher, store) + 2 binaires :
-  `purple` (fenêtre, sous-système Windows en release, pas de console) et `purplectl` (ligne de commande).
-- `engine::run` = boucle partagée (événements `engine::Event`) ; la fenêtre la lance dans un thread, `purplectl run`
-  l'affiche dans le terminal. La fenêtre écrit `config.json`, le moteur le relit à chaque seconde de champ select
-  (changer de skin pendant le champ select ré-arme).
-- UI : egui/eframe 0.36 (backend `glow`, pas `wgpu` : plus léger). API 0.36 : `App::logic` + `App::ui`, `egui::Panel`.
-- Images : portraits + tuiles de skins viennent du client (`/lol-game-data/assets/...`), cache disque
-  `%LOCALAPPDATA%\Purple\img`, décodées/réduites dans un thread, textures plafonnées (240). Catalogue mis en cache
-  (`catalog.json`) : la fenêtre s'ouvre même client fermé.
-- Champions `Jade_*` (ids >= 60000, autre mode de jeu) masqués : ils doublonnaient tous les noms.
-- La fenêtre refuse de se fermer pendant une partie (tuer le patcher sous le jeu = risque).
-- Vérifié par captures + clics simulés : choix, annulation, bouton « skin par défaut », config.json mis à jour.
-- Mémoire release : fenêtre ouverte ~115 Mo (surtout contexte OpenGL + polices + textures), contre ~15 Mo pour
-  le moteur seul. Piste : démon tray (moteur seul, ~15 Mo) + fenêtre lancée à la demande dans un processus à part.
-- Captures d'écran sous Windows : `SetProcessDPIAware` indispensable sinon la capture est rognée (échelle 125 %).
+- Structure: `purple` lib (catalog, config, engine, gui, images, lcu, overlay, patcher, store) + 2 binaries:
+  `purple` (window, Windows subsystem in release, no console) and `purplectl` (command line).
+- `engine::run` = shared loop (`engine::Event` events); the window runs it in a thread, `purplectl run`
+  prints it in the terminal. The window writes `config.json`, the engine reads it again every second of champ
+  select (changing the skin during champ select re-arms).
+- UI: egui/eframe 0.36 (`glow` backend, not `wgpu`: lighter). 0.36 API: `App::logic` + `App::ui`, `egui::Panel`.
+- Pictures: portraits + skin tiles come from the client (`/lol-game-data/assets/...`), disk cache
+  `%LOCALAPPDATA%\Purple\img`, decoded/downscaled in a thread, textures capped (240). Catalog cached
+  (`catalog.json`): the window opens even with the client closed.
+- `Jade_*` champions (ids >= 60000, another game mode) hidden: they duplicated every name.
+- The window refuses to close during a game (killing the patcher under the game = risk).
+- Checked with captures + simulated clicks: choice, cancel, "default skin" button, config.json updated.
+- Release memory: window open ~115 MB (mostly OpenGL context + fonts + textures), against ~15 MB for
+  the engine alone. Idea: tray daemon (engine only, ~15 MB) + window started on demand in a separate process.
+- Screenshots on Windows: `SetProcessDPIAware` is required, otherwise the capture is cropped (125 % scale).
 
-## Tray (2026-10-03) — architecture finale à 3 binaires
+## Tray (2026-10-03) — final architecture with 3 binaries
 
-- `purple.exe` : programme résident (moteur + icône de zone de notification, tray-icon 0.26 + boucle de messages
-  Win32). Release : ~15 Mo (3,6 Mo privés), aucune fenêtre. Menu : état (grisé), Ouvrir Purple, Quitter.
-  Clic gauche sur l'icône = ouvre la fenêtre. « Quitter » pendant une partie = attend la fin de la partie.
-  Instance unique (mutex `Local\Purple.Daemon`) ; un 2e lancement ouvre la fenêtre. Journal : `purple.log`.
-- `purple-ui.exe` : la fenêtre (egui). Process à part, lancé à la demande, libère ses ~100 Mo à la fermeture.
-  Instance unique (`Local\Purple.Window`, sinon focus sur la fenêtre existante, titre « Purple Skin Changer »).
-  Lecture seule de l'état : `status.json` (écrit par le tray), écrit `config.json`. Affiche « Engine stopped » +
-  bouton « Start it » si le tray ne tourne pas.
-- `purplectl.exe` : ligne de commande (dev/diagnostic) ; ne pas lancer `purplectl run` en même temps que le tray.
-- Le patcher est rattaché à un job Windows KILL_ON_JOB_CLOSE : il meurt avec `purple.exe` (crash, kill) au lieu de
-  rester actif et de patcher une prochaine partie avec un vieil overlay.
-- Le patcher est lancé avec CREATE_NO_WINDOW (sinon console noire visible quand le parent est sans console).
-- Windows 11 range les nouvelles icônes dans le menu « ^ » (icônes cachées) : à glisser vers la barre.
-- Reste à faire : lancement au démarrage de Windows, icône dans le .exe (ressource), noms de skins en anglais
-  (CommunityDragon en_gb a les mêmes ids : 2159 skins ; actuellement noms dans la langue du client),
-  mise à jour automatique du patcher LTK (date de fin de vie), chromas, skins déjà possédés.
+- `purple.exe`: resident program (engine + notification-area icon, tray-icon 0.26 + Win32 message
+  loop). Release: ~15 MB (3.6 MB private), no window. Menu: state (greyed out), Open Purple, Quit.
+  Left click on the icon = opens the window. "Quit" during a game = waits for the game to end.
+  Single instance (mutex `Local\Purple.Daemon`); a 2nd launch opens the window. Log: `purple.log`.
+- `purple-ui.exe`: the window (egui). Separate process, started on demand, frees its ~100 MB when closed.
+  Single instance (`Local\Purple.Window`, otherwise focuses the existing window, title "Purple Skin Changer").
+  Read-only state: `status.json` (written by the tray), writes `config.json`. Shows "Engine stopped" +
+  a "Start it" button if the tray is not running.
+- `purplectl.exe`: command line (dev/diagnostics); do not run `purplectl run` alongside the tray.
+- The patcher is attached to a KILL_ON_JOB_CLOSE Windows job: it dies with `purple.exe` (crash, kill) instead of
+  staying active and patching a later game with an old overlay.
+- The patcher is started with CREATE_NO_WINDOW (otherwise a black console shows when the parent has no console).
+- Windows 11 puts new icons in the "^" menu (hidden icons): drag it to the taskbar.
+- Still to do: start with Windows, icon in the .exe (resource), English skin names
+  (CommunityDragon en_gb has the same ids: 2159 skins; names currently in the client's language),
+  automatic update of the LTK patcher (end-of-life date), chromas, skins already owned.

@@ -1,228 +1,233 @@
 <p align="center">
-  <img src="docs/banner.png" alt="Purple — changeur de skins pour League of Legends" width="100%">
+  <img src="docs/banner.png" alt="Purple, a skin changer for League of Legends" width="100%">
 </p>
 
 <p align="center">
-  <a href="https://github.com/AlexLynx77/Purple/releases/latest"><img src="https://img.shields.io/github/v/release/AlexLynx77/Purple?style=flat-square&color=8b5cf6&label=version" alt="Dernière version"></a>
+  <a href="https://github.com/AlexLynx77/Purple/releases/latest"><img src="https://img.shields.io/github/v/release/AlexLynx77/Purple?style=flat-square&color=8b5cf6&label=version" alt="Latest version"></a>
   <img src="https://img.shields.io/badge/Windows-10%20%7C%2011-555?style=flat-square" alt="Windows 10 | 11">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/licence-MIT-555?style=flat-square" alt="Licence MIT"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-555?style=flat-square" alt="MIT license"></a>
 </p>
 
-Changeur de skins pour League of Legends. Un seul exécutable Windows, écrit en Rust.
+Skin changer for League of Legends. A single Windows executable, written in Rust.
 
-Choisissez un skin par champion. Lorsque vous sélectionnez ce champion en sélection des champions, Purple prépare
-le skin et le fait charger par le jeu. Le skin n'est visible que par vous : la modification est locale.
+Pick a skin for each champion. When you pick that champion in champion select, Purple prepares the skin and has the
+game load it. Only you see the skin: the change is local.
 
 > [!WARNING]
-> Riot Games n'autorise pas les outils qui modifient les fichiers du jeu, même côté client. Leur utilisation se fait
-> à vos risques (une suspension de compte est possible). Purple est un projet personnel, sans lien avec Riot Games.
+> Riot Games does not allow tools that modify game files, even client-side. Use them at your own risk (your account
+> may be suspended). Purple is a personal project, not affiliated with Riot Games.
 
-## Sommaire
+## Contents
 
-- [Caractéristiques](#caractéristiques)
+- [Features](#features)
 - [Installation](#installation)
-- [Utilisation](#utilisation)
-- [Fonctionnement](#fonctionnement)
-- [Dépendances externes](#dépendances-externes)
-- [Données et configuration](#données-et-configuration)
-- [Dépannage](#dépannage)
-- [Développement](#développement)
-- [Feuille de route](#feuille-de-route)
-- [Crédits et licences](#crédits-et-licences)
+- [Usage](#usage)
+- [How it works](#how-it-works)
+- [External dependencies](#external-dependencies)
+- [Data and configuration](#data-and-configuration)
+- [Troubleshooting](#troubleshooting)
+- [Development](#development)
+- [Roadmap](#roadmap)
+- [Credits and licenses](#credits-and-licenses)
 
-## Caractéristiques
+## Features
 
-- **Un seul fichier**, `purple.exe`, sans installation ni autre application de skins.
-- **Skins et chromas**, y compris les chromas du skin par défaut.
-- **Skins générés localement** à partir des fichiers du jeu ; téléchargement depuis LeagueSkins seulement en secours.
-- **Fonctionne client fermé** : champions, skins et images sont lus directement dans les fichiers de League of Legends.
-- **Patcher tenu à jour automatiquement** : Purple télécharge la version officielle et vérifie sa signature.
-- **Léger** : ~18 Mo de RAM en arrière-plan ; la fenêtre (~110 Mo) libère sa mémoire dès qu'elle est fermée.
-- **Sans compte ni télémétrie.**
-- **Non destructif** : les archives du jeu ne sont jamais modifiées.
+- **A single file**, `purple.exe`: no installer, no other skin application.
+- **Skins and chromas**, including the default skin's chromas.
+- **Skins generated locally** from the game's files; downloaded from LeagueSkins only as a fallback.
+- **Works with the client closed**: champions, skins and pictures are read straight from the League of Legends files.
+- **Patcher kept up to date automatically**: Purple downloads the official release and checks its signature.
+- **One-click updates**: Purple looks for a new release at startup and then daily, replaces itself and restarts;
+  only one `purple.exe` is left.
+- **Lightweight**: ~18 MB of RAM in the background; the window (~110 MB) frees its memory as soon as it is closed.
+- **No account, no telemetry.**
+- **Non-destructive**: the game's archives are never modified.
 
-Testé sous Windows 11, serveur EUW, client en français.
+Tested on Windows 11, EUW server, French client.
 
 ## Installation
 
-1. Téléchargez `purple.exe` depuis la page [Releases](https://github.com/AlexLynx77/Purple/releases).
-2. Placez-le où vous voulez et lancez-le.
+1. Download `purple.exe` from the [Releases](https://github.com/AlexLynx77/Purple/releases) page.
+2. Put it anywhere you like and run it.
 
-Au premier lancement, Purple télécharge LTK Patcher (≈ 2 Mo) ; une connexion internet est nécessaire cette fois-là.
+On first launch, Purple downloads LTK Patcher (≈ 2 MB), so an internet connection is needed that time.
 
-Prérequis : Windows 10 ou 11 (64 bits) et League of Legends installé.
+Requirements: Windows 10 or 11 (64-bit) and League of Legends installed.
 
-## Utilisation
+## Usage
 
-1. Lancez `purple.exe`. La fenêtre s'ouvre et une icône apparaît dans la zone de notification.
-2. Choisissez un champion à gauche, puis un skin. **Default** rétablit le skin de base. Les champions qui ont un skin
-   choisi sont signalés par un point et le nom du skin.
-3. Pour un chroma : cliquez sur le petit rond en bas à droite de l'image du skin, puis sur une couleur. Le cercle vide
-   revient au skin sans chroma.
-4. Jouez normalement. En sélection des champions, Purple prépare le skin du champion choisi (≈ 1 s).
-5. Fermer la fenêtre laisse Purple actif dans la zone de notification. Un clic sur l'icône la rouvre.
-6. Pour quitter : clic droit sur l'icône → *Quit*. Pendant une partie, Purple attend sa fin.
+1. Run `purple.exe`. The window opens and an icon appears in the notification area.
+2. Pick a champion on the left, then a skin. **Default** restores the base skin. Champions with a chosen skin are
+   marked with a dot and the skin's name.
+3. For a chroma: click the small circle at the bottom right of the skin's picture, then a colour. The empty circle
+   goes back to the skin without a chroma.
+4. Play as usual. In champion select, Purple prepares the chosen champion's skin (≈ 1 s).
+5. Closing the window keeps Purple running in the notification area. Clicking the icon opens it again.
+6. To quit: right-click the icon → *Quit*. During a game, Purple waits for it to end.
+7. When a new version is released, a banner offers to update. Purple downloads it, replaces itself and restarts
+   (not during a game).
 
-`purple.exe --background` démarre directement dans la zone de notification, sans ouvrir la fenêtre.
+`purple.exe --background` starts straight in the notification area, without opening the window.
 
-## Fonctionnement
+## How it works
 
 ```mermaid
 flowchart LR
-  subgraph PC["Votre PC"]
-    D["purple.exe<br/>moteur + icône"]
-    UI["purple.exe --window<br/>fenêtre, à la demande"]
+  subgraph PC["Your PC"]
+    D["purple.exe<br/>engine + icon"]
+    UI["purple.exe --window<br/>window, on demand"]
     H["ltk_patcher_host.exe"]
-    C["Client LoL<br/>(API locale)"]
-    A[("Fichiers du client<br/>Plugins/rcp-be-lol-game-data")]
+    C["LoL client<br/>(local API)"]
+    A[("Client files<br/>Plugins/rcp-be-lol-game-data")]
     G["League of Legends.exe"]
     O[("Overlay<br/>%PROGRAMDATA%\\Purple")]
   end
-  GH["GitHub<br/>LTK Manager, LeagueSkins (secours)"]
+  GH["GitHub<br/>Purple, LTK Manager, LeagueSkins (fallback)"]
 
-  D -- "ouvre" --> UI
-  UI -- "lit catalogue et images" --> A
-  D -- "génère le skin" --> A
-  D -- "phase de jeu, champion" --> C
-  D -- "patcher" --> GH
-  D -- "construit" --> O
-  D -- "pilote" --> H
-  H -- "injecte la DLL" --> G
-  G -- "lit le skin" --> O
+  D -- "opens" --> UI
+  UI -- "reads catalog and pictures" --> A
+  D -- "generates the skin" --> A
+  D -- "game phase, champion" --> C
+  D -- "updates" --> GH
+  D -- "builds" --> O
+  D -- "drives" --> H
+  H -- "injects the DLL" --> G
+  G -- "reads the skin" --> O
 ```
 
-Le moteur et la fenêtre sont deux processus du même exécutable. Ils communiquent par deux fichiers JSON
+The engine and the window are two processes of the same executable. They communicate through two JSON files
 (`config.json`, `status.json`).
 
-### Les étapes d'un skin
+### Steps of a skin
 
-1. **Fichier de skin.** Un skin est une archive `.fantome` de quelques Ko qui redirige le skin de base du champion vers
-   les données du skin choisi (ou du chroma), déjà présentes dans le jeu. Purple la génère à partir de l'archive du
-   champion (`skingen.rs`) et la régénère après chaque patch. Sur 374 skins testés, 359 sont identiques aux fichiers du
-   dépôt [LeagueSkins](https://github.com/Alban1911/LeagueSkins) ; les autres contiennent des corrections faites à la
-   main. Si la génération échoue, Purple télécharge le fichier de LeagueSkins (`PURPLE_SKIN_SOURCE=leagueskins`
-   inverse cet ordre).
-2. **Overlay.** La bibliothèque `ltk_overlay` crée une copie de l'archive du champion (`<Champion>.wad.client`) à
-   laquelle le skin est ajouté. La reconstruction est incrémentale.
-3. **Patcher.** `ltk_patcher_host.exe` attend le lancement du jeu et y injecte une DLL qui lui fait lire l'overlay au
-   lieu de l'archive d'origine. Il doit être armé avant le lancement de la partie, d'où la préparation dès la
-   sélection des champions.
+1. **Skin file.** A skin is a `.fantome` archive of a few KB that redirects the champion's base skin to the data of
+   the chosen skin (or chroma), already present in the game. Purple generates it from the champion's archive
+   (`skingen.rs`) and generates it again after each patch. Out of 374 skins tested, 359 are identical to the files of
+   the [LeagueSkins](https://github.com/Alban1911/LeagueSkins) repository; the others contain hand-made fixes. If
+   generation fails, Purple downloads the file from LeagueSkins (`PURPLE_SKIN_SOURCE=leagueskins` reverses this order).
+2. **Overlay.** The `ltk_overlay` library creates a copy of the champion's archive (`<Champion>.wad.client`) with the
+   skin added. Rebuilds are incremental.
+3. **Patcher.** `ltk_patcher_host.exe` waits for the game to start and injects a DLL that makes it read the overlay
+   instead of the original archive. It must be armed before the game starts, hence the preparation during champion
+   select.
 
-### Cycle du moteur
+### Engine cycle
 
 ```
-client fermé ──► attend
-ChampSelect ───► champion choisi → skin configuré ?
-                   oui → récupère le skin → construit l'overlay → arme le patcher
-                   non → désarme
-InProgress ────► le patcher reste attaché au jeu jusqu'à la fin de la partie
-fin de partie ─► arrête la session du patcher
+client closed ─► waits
+ChampSelect ───► champion picked → skin chosen?
+                   yes → gets the skin → builds the overlay → arms the patcher
+                   no  → disarms
+InProgress ────► the patcher stays attached to the game until it ends
+game over ─────► stops the patcher session
 ```
 
-### Architecture du code
+### Code layout
 
-Une bibliothèque et un exécutable dans [`crates/purple`](crates/purple).
+One library and one executable in [`crates/purple`](crates/purple).
 
-| Module | Rôle |
+| Module | Role |
 |---|---|
-| `main.rs` | Point d'entrée : moteur + icône, fenêtre (`--window`) ou ligne de commande. |
-| `gui.rs`, `images.rs` | Fenêtre (`egui`) et chargement des images. |
-| `engine.rs` | Boucle du moteur. |
-| `lcu.rs` | API locale du client (phase de jeu, sélection des champions). |
-| `client_assets.rs` | Lecture du catalogue et des images dans les fichiers du client. |
-| `catalog.rs` | Champions, skins et chromas. |
-| `skingen.rs` | Génération des fichiers de skin à partir des fichiers du jeu. |
-| `store.rs` | Dossiers de données, cache des skins (générés ou téléchargés), journal. |
-| `overlay.rs` | Construction de l'overlay. |
-| `patcher.rs`, `patcher_install.rs` | Pilotage du patcher ; téléchargement, vérification et mise à jour. |
-| `cli.rs` | Commandes de diagnostic. |
-| `config.rs`, `status.rs` | Choix de l'utilisateur, état partagé avec la fenêtre. |
-| `win.rs`, `icon.rs` | Aides Win32 ; logo dessiné en code (`build.rs` l'intègre à l'exécutable). |
+| `main.rs` | Entry point: engine + icon, window (`--window`) or command line. |
+| `gui.rs`, `images.rs` | Window (`egui`) and picture loading. |
+| `engine.rs` | Engine loop. |
+| `lcu.rs` | Client local API (game phase, champion select). |
+| `client_assets.rs` | Reads the catalog and pictures from the client's files. |
+| `catalog.rs` | Champions, skins and chromas. |
+| `skingen.rs` | Generates skin files from the game's files. |
+| `store.rs` | Data folders, skin cache (generated or downloaded), log. |
+| `overlay.rs` | Builds the overlay. |
+| `patcher.rs`, `patcher_install.rs` | Drives the patcher; download, verification and updates. |
+| `update.rs` | Updates Purple from its GitHub releases (`self-replace`). |
+| `cli.rs` | Diagnostic commands. |
+| `config.rs`, `status.rs` | User choices, state shared with the window. |
+| `win.rs`, `icon.rs` | Win32 helpers; logo drawn in code (`build.rs` embeds it in the executable). |
 
-## Dépendances externes
+## External dependencies
 
-| Dépendance | Rôle | Après un patch du jeu |
+| Dependency | Role | After a game patch |
 |---|---|---|
-| **LTK Patcher** ([LeagueToolkit/ltk-manager](https://github.com/LeagueToolkit/ltk-manager)), binaires fermés | Injection dans le jeu | Rien à faire : Purple installe la dernière release stable au démarrage et dès que le patcher signale qu'il est trop ancien. |
-| **[LeagueSkins](https://github.com/Alban1911/LeagueSkins)** | Secours, si la génération locale échoue | Rien à faire : les fichiers en cache sont revalidés. |
-| **Crates LeagueToolkit** (`ltk_overlay`, `ltk_wad`…), Apache-2.0 | Lecture et écriture des archives du jeu | Mise à jour seulement si le format des archives change. |
+| **LTK Patcher** ([LeagueToolkit/ltk-manager](https://github.com/LeagueToolkit/ltk-manager)), closed-source binaries | Injection into the game | Nothing to do: Purple installs the latest stable release at startup and as soon as the patcher reports it is too old. |
+| **[LeagueSkins](https://github.com/Alban1911/LeagueSkins)** | Fallback when local generation fails | Nothing to do: cached files are revalidated. |
+| **LeagueToolkit crates** (`ltk_overlay`, `ltk_wad`…), Apache-2.0 | Reading and writing the game's archives | Update only if the archive format changes. |
 
-Purple ne redistribue pas LTK Patcher : sa licence impose de retirer la signature de LeagueToolkit en cas de
-redistribution. Purple télécharge donc les fichiers officiels et refuse ceux dont la signature Authenticode n'est pas
-valide.
+Purple does not redistribute LTK Patcher: its license requires removing LeagueToolkit's signature when redistributing
+it. Purple therefore downloads the official files and refuses any whose Authenticode signature is not valid.
 
-Le catalogue, les images et les skins ne dépendent d'aucun service : ils viennent de l'installation de League of
-Legends. Seuls GitHub (patcher, et skins en secours) et l'API locale du client sont contactés. Aucune télémétrie. Le comportement réseau
-des binaires fermés du patcher n'a pas été vérifié.
+The catalog, pictures and skins depend on no service: they come from the League of Legends installation. Only GitHub
+(Purple and patcher updates, fallback skins) and the client's local API are contacted. No telemetry. The network
+behaviour of the patcher's closed-source binaries has not been checked.
 
-## Données et configuration
+## Data and configuration
 
-| Emplacement | Contenu |
+| Location | Contents |
 |---|---|
-| `%LOCALAPPDATA%\Purple\config.json` | Choix de skins : `{"skins": {"<id champion>": <id skin>}}`. |
-| `%LOCALAPPDATA%\Purple\status.json` | État du moteur. |
-| `%LOCALAPPDATA%\Purple\catalog.json`, `img\`, `skins\` | Caches : catalogue, images, fichiers de skins. |
-| `%LOCALAPPDATA%\Purple\purple.log` | Journal (remis à zéro au-delà de 1 Mo). |
-| `%PROGRAMDATA%\Purple\patcher\` | LTK Patcher, un dossier par version. |
-| `%PROGRAMDATA%\Purple\overlay\`, `state\` | Overlay du dernier skin préparé (≈ 110 Mo). |
+| `%LOCALAPPDATA%\Purple\config.json` | Skin choices: `{"skins": {"<champion id>": <skin id>}}`. |
+| `%LOCALAPPDATA%\Purple\status.json` | Engine state. |
+| `%LOCALAPPDATA%\Purple\catalog.json`, `img\`, `skins\` | Caches: catalog, pictures, skin files. |
+| `%LOCALAPPDATA%\Purple\purple.log` | Log (cleared past 1 MB). |
+| `%PROGRAMDATA%\Purple\patcher\` | LTK Patcher, one folder per version. |
+| `%PROGRAMDATA%\Purple\overlay\`, `state\` | Overlay of the last prepared skin (≈ 110 MB). |
 
-L'overlay et le patcher sont hors du profil utilisateur : le jeu ne peut pas lire sous `C:\Users\<nom>`.
+The overlay and the patcher live outside the user profile: the game cannot read under `C:\Users\<name>`.
 
-| Variable d'environnement | Effet |
+| Environment variable | Effect |
 |---|---|
-| `PURPLE_DEBUG=1` | Journal détaillé du patcher. |
-| `PURPLE_DATA_DIR` | Regroupe toutes les données dans ce dossier (tests). |
-| `PURPLE_PATCHER_DIR` | Utilise ce patcher au lieu de la version gérée par Purple. |
-| `PURPLE_SKIN_SOURCE=leagueskins` | Préfère les fichiers de LeagueSkins aux skins générés. |
+| `PURPLE_DEBUG=1` | Detailed patcher log. |
+| `PURPLE_DATA_DIR` | Keeps all data in this folder (tests). |
+| `PURPLE_PATCHER_DIR` | Uses this patcher instead of the one Purple manages. |
+| `PURPLE_SKIN_SOURCE=leagueskins` | Prefers LeagueSkins' files over generated skins. |
+| `PURPLE_UPDATE_URL` | Asks this address instead of the GitHub API for the latest release (tests). |
 
-## Dépannage
+## Troubleshooting
 
-| Symptôme | Solution |
+| Symptom | Solution |
 |---|---|
-| Avertissement « LTK Patcher does not support this game version yet » | Attendre la release de LTK Manager qui suit le patch ; Purple l'installe seul. Forcer la vérification : `purple.exe update-patcher`. |
-| Skin préparé mais invisible en jeu | Consulter `purple.log` ; vérifier que `%PROGRAMDATA%\Purple` est accessible. |
-| Un skin ne s'applique pas | `purple.exe build <id champion> <id skin>` indique s'il a été généré ou téléchargé, et pourquoi en cas d'échec. |
-| Rien ne se passe en sélection des champions | Vérifier l'état en bas à gauche de la fenêtre, puis `purple.log`. |
+| Warning "LTK Patcher does not support this game version yet" | Wait for the LTK Manager release that follows the patch; Purple installs it by itself. To check now: `purple.exe update-patcher`. |
+| "Could not update Purple" | Purple must be able to write to the folder of `purple.exe`: move it (to `Documents`, for example) or download the release by hand. |
+| Skin prepared but not visible in game | Check `purple.log`; make sure `%PROGRAMDATA%\Purple` is accessible. |
+| A skin does not apply | `purple.exe build <champion id> <skin id>` tells whether it was generated or downloaded, and why it failed. |
+| Nothing happens in champion select | Check the state at the bottom left of the window, then `purple.log`. |
 
-En ligne de commande (`purple.exe help`) : `status`, `skins <champion>`, `set`, `unset`, `list`, `update-patcher`, et
-`run`, qui suit le moteur en direct (à lancer sans autre instance de Purple active).
+On the command line (`purple.exe help`): `status`, `skins <champion>`, `set`, `unset`, `list`, `update-patcher`, and
+`run`, which follows the engine live (run it with no other Purple instance active).
 
-## Développement
+## Development
 
-Prérequis : [Rust](https://rustup.rs) et un compilateur C (requis par `zstd`).
+Requirements: [Rust](https://rustup.rs) and a C compiler (needed by `zstd`).
 
 ```powershell
-.\scripts\package.ps1         # compile en release et copie dist\purple.exe
+.\scripts\package.ps1         # release build, copied to dist\purple.exe
 ```
 
-Le dépôt utilise la toolchain Rust **GNU** avec [w64devkit](https://github.com/skeeto/w64devkit) :
-`rust-toolchain.toml` épingle `stable-x86_64-pc-windows-gnu` et `.cargo/config.toml` contient les chemins de w64devkit
-(à adapter). Avec les Build Tools Visual Studio, supprimez ces deux fichiers pour utiliser MSVC. w64devkit nécessite un
-fichier vide `lib\libgcc_eh.a`. Lancez `cargo` depuis PowerShell.
+The repository uses the **GNU** Rust toolchain with [w64devkit](https://github.com/skeeto/w64devkit):
+`rust-toolchain.toml` pins `stable-x86_64-pc-windows-gnu` and `.cargo/config.toml` holds the w64devkit paths (adapt
+them). With the Visual Studio Build Tools, delete these two files to use MSVC. w64devkit needs an empty
+`lib\libgcc_eh.a` file. Run `cargo` from PowerShell.
 
 ```powershell
 cargo test -p purple
 cargo clippy -p purple --all-targets
 ```
 
-`PURPLE_SCREENSHOT=<fichier.png>` (avec `purple.exe --window`) enregistre une capture de la fenêtre puis la ferme ;
-`PURPLE_SCREENSHOT_CHAMPION` choisit le champion affiché et `PURPLE_SCREENSHOT_PICKER=1` ouvre le sélecteur de chromas.
+`PURPLE_SCREENSHOT=<file.png>` (with `purple.exe --window`) saves a capture of the window, then closes it;
+`PURPLE_SCREENSHOT_CHAMPION` picks the champion shown and `PURPLE_SCREENSHOT_PICKER=1` opens the chroma picker.
 
-Notes :
+Notes:
 
-- `zip` est épinglé à 2.4.2 : la 2.6.1 casse la compilation de `ltk_fantome`.
-- Les champions des modes alternatifs (ids ≥ 60000) sont masqués.
-- L'historique des recherches est dans [`docs/JOURNAL.md`](docs/JOURNAL.md).
+- `zip` is pinned to 2.4.2: 2.6.1 breaks the `ltk_fantome` build.
+- Champions of alternate modes (ids ≥ 60000) are hidden.
+- The research history is in [`docs/JOURNAL.md`](docs/JOURNAL.md).
 
-## Feuille de route
+## Roadmap
 
-- [ ] Formes spéciales (skins à plusieurs formes, skins Prestige à niveaux)
+- [ ] Special forms (skins with several forms, tiered Prestige skins)
 
-## Crédits et licences
+## Credits and licenses
 
-- [LeagueToolkit](https://github.com/LeagueToolkit) : crates `ltk_*` (Apache-2.0) et LTK Patcher (licence propre,
-  voir `LTK-PATCHER-LICENSE.md` dans [ltk-manager](https://github.com/LeagueToolkit/ltk-manager)).
-- [Alban1911/LeagueSkins](https://github.com/Alban1911/LeagueSkins) : fichiers de skins.
+- [LeagueToolkit](https://github.com/LeagueToolkit): `ltk_*` crates (Apache-2.0) and LTK Patcher (own license, see
+  `LTK-PATCHER-LICENSE.md` in [ltk-manager](https://github.com/LeagueToolkit/ltk-manager)).
+- [Alban1911/LeagueSkins](https://github.com/Alban1911/LeagueSkins): skin files.
 
-Purple est distribué sous licence [MIT](LICENSE). Cette licence couvre le code de Purple, pas LTK Patcher ni les
-fichiers de skins, qui gardent leur propre licence. League of Legends est une marque de Riot Games, Inc.
+Purple is released under the [MIT](LICENSE) license. It covers Purple's code, not LTK Patcher nor the skin files,
+which keep their own licenses. League of Legends is a trademark of Riot Games, Inc.

@@ -1,4 +1,4 @@
-﻿# Toolchain MinGW (w64devkit) installée hors PATH système : voir NOTES.md
+# MinGW toolchain (w64devkit) installed outside the system PATH: see README > Development
 [target.x86_64-pc-windows-gnu]
 linker = "C:/Users/pierr/tools/w64devkit/bin/gcc.exe"
 ar = "C:/Users/pierr/tools/w64devkit/bin/ar.exe"

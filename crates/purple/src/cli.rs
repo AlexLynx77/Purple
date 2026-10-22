@@ -161,5 +161,7 @@ fn run() -> Result<()> {
             eprintln!("the game could not read the overlay, so no skin will show: {message}");
         }
         Event::Error(message) => eprintln!("{message}"),
+        // The engine alone never updates Purple; the resident program does.
+        Event::UpdateAvailable(_) | Event::Updating | Event::UpdateFailed(_) => {}
     })
 }

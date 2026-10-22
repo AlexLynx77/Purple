@@ -3,12 +3,14 @@
 use anyhow::{Context, Result};
 use std::os::windows::process::CommandExt;
 use std::process::Command;
-use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, ERROR_ALREADY_EXISTS, HANDLE};
+use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, ERROR_ALREADY_EXISTS, HANDLE, WAIT_OBJECT_0};
 use windows_sys::Win32::System::JobObjects::{
     AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation, SetInformationJobObject,
     JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
 };
-use windows_sys::Win32::System::Threading::{CreateMutexW, GetCurrentThreadId, OpenMutexW};
+use windows_sys::Win32::System::Threading::{
+    CreateEventW, CreateMutexW, GetCurrentThreadId, OpenEventW, OpenMutexW, SetEvent, WaitForSingleObject,
+};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     DispatchMessageW, FindWindowW, GetMessageW, PostThreadMessageW, SetForegroundWindow, ShowWindow,
     TranslateMessage, MSG, SW_RESTORE, WM_APP,
@@ -31,6 +33,7 @@ pub const WINDOW_TITLE: &str = "Purple Skin Changer";
 
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const SYNCHRONIZE: u32 = 0x0010_0000;
+const EVENT_MODIFY_STATE: u32 = 0x0002;
 /// Thread message: the engine's state changed, refresh the tray.
 pub const MSG_WAKE: u32 = WM_APP;
 /// Thread message: leave the message loop.
@@ -114,6 +117,48 @@ pub fn is_running(name: &str) -> bool {
     }
 }
 
+/// A named event another process can signal with [`signal`] (auto-reset: one wait per signal).
+pub struct NamedEvent(HANDLE);
+
+impl NamedEvent {
+    pub fn create(name: &str) -> Result<Self> {
+        let name = wide(name);
+        // SAFETY: `name` is NUL-terminated and outlives the call.
+        let handle = unsafe { CreateEventW(std::ptr::null(), 0, 0, name.as_ptr()) };
+        anyhow::ensure!(!handle.is_null(), "CreateEventW failed");
+        Ok(Self(handle))
+    }
+
+    /// Waits up to `timeout` for a signal; returns whether one came.
+    pub fn wait(&self, timeout: std::time::Duration) -> bool {
+        let millis = u32::try_from(timeout.as_millis()).unwrap_or(u32::MAX - 1);
+        // SAFETY: the handle is valid for the lifetime of `self`.
+        unsafe { WaitForSingleObject(self.0, millis) == WAIT_OBJECT_0 }
+    }
+}
+
+impl Drop for NamedEvent {
+    fn drop(&mut self) {
+        // SAFETY: the handle came from CreateEventW and is closed exactly once.
+        unsafe { CloseHandle(self.0) };
+    }
+}
+
+/// Signals the named event `name`; returns false when no process has created it.
+pub fn signal(name: &str) -> bool {
+    let name = wide(name);
+    // SAFETY: `name` is NUL-terminated and outlives the call; the handle is closed after use.
+    unsafe {
+        let handle = OpenEventW(EVENT_MODIFY_STATE, 0, name.as_ptr());
+        if handle.is_null() {
+            return false;
+        }
+        let ok = SetEvent(handle) != 0;
+        CloseHandle(handle);
+        ok
+    }
+}
+
 /// Brings the top-level window titled `title` to the front. Returns whether one was found.
 pub fn focus_window(title: &str) -> bool {
     let title = wide(title);
@@ -142,15 +187,19 @@ pub fn close_window(title: &str) {
     }
 }
 
-/// Starts this same program again with `arg`, without a console.
-fn spawn_self(arg: &str) -> Result<()> {
-    let exe = std::env::current_exe().context("locating the running program")?;
-    Command::new(&exe)
+/// Starts `exe` with `arg`, without a console.
+pub fn spawn_program(exe: &std::path::Path, arg: &str) -> Result<()> {
+    Command::new(exe)
         .arg(arg)
         .creation_flags(CREATE_NO_WINDOW)
         .spawn()
         .with_context(|| format!("starting {} {arg}", exe.display()))?;
     Ok(())
+}
+
+/// Starts this same program again with `arg`, without a console.
+fn spawn_self(arg: &str) -> Result<()> {
+    spawn_program(&std::env::current_exe().context("locating the running program")?, arg)
 }
 
 /// Argument that makes `purple.exe` open only the window.
@@ -234,6 +283,17 @@ mod tests {
         }
         let _ = child.kill();
         panic!("the process survived the job closing");
+    }
+
+    #[test]
+    fn a_named_event_wakes_one_wait_per_signal() {
+        let name = r"Local\Purple.Test.Event";
+        assert!(!signal(name), "nobody created it yet");
+        let event = NamedEvent::create(name).unwrap();
+        assert!(!event.wait(Duration::from_millis(10)));
+        assert!(signal(name));
+        assert!(event.wait(Duration::from_millis(10)));
+        assert!(!event.wait(Duration::from_millis(10)), "auto-reset");
     }
 
     #[test]

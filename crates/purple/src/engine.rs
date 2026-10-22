@@ -30,6 +30,11 @@ pub enum Event {
     /// The game could not read the overlay, so no skin will show.
     OverlayUnreadable(String),
     Error(String),
+    /// A newer Purple is released (its version).
+    UpdateAvailable(String),
+    /// Purple is downloading and installing the update.
+    Updating,
+    UpdateFailed(String),
 }
 
 /// The champion the local player has hovered or locked in, or 0 when none.
